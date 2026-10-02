@@ -1,0 +1,431 @@
+{
+  "version": 3,
+  "targets": {
+    "net8.0-windows7.0": {
+      "Microsoft.AI.DirectML/1.15.4": {
+        "type": "package",
+        "build": {
+          "build/Microsoft.AI.DirectML.props": {},
+          "build/Microsoft.AI.DirectML.targets": {}
+        }
+      },
+      "Microsoft.ML.OnnxRuntime.DirectML/1.24.4": {
+        "type": "package",
+        "dependencies": {
+          "Microsoft.AI.DirectML": "1.15.4",
+          "Microsoft.ML.OnnxRuntime.Managed": "1.24.4"
+        },
+        "build": {
+          "build/netstandard2.1/Microsoft.ML.OnnxRuntime.DirectML.props": {},
+          "build/netstandard2.1/Microsoft.ML.OnnxRuntime.DirectML.targets": {}
+        },
+        "runtimeTargets": {
+          "runtimes/win-arm64/native/onnxruntime.dll": {
+            "assetType": "native",
+            "rid": "win-arm64"
+          },
+          "runtimes/win-arm64/native/onnxruntime.lib": {
+            "assetType": "native",
+            "rid": "win-arm64"
+          },
+          "runtimes/win-arm64/native/onnxruntime_providers_shared.dll": {
+            "assetType": "native",
+            "rid": "win-arm64"
+          },
+          "runtimes/win-x64/native/onnxruntime.dll": {
+            "assetType": "native",
+            "rid": "win-x64"
+          },
+          "runtimes/win-x64/native/onnxruntime.lib": {
+            "assetType": "native",
+            "rid": "win-x64"
+          },
+          "runtimes/win-x64/native/onnxruntime_providers_shared.dll": {
+            "assetType": "native",
+            "rid": "win-x64"
+          }
+        }
+      },
+      "Microsoft.ML.OnnxRuntime.Managed/1.24.4": {
+        "type": "package",
+        "dependencies": {
+          "System.Memory": "4.5.5",
+          "System.Numerics.Tensors": "9.0.0"
+        },
+        "compile": {
+          "lib/net8.0/Microsoft.ML.OnnxRuntime.dll": {
+            "related": ".pdb"
+          }
+        },
+        "runtime": {
+          "lib/net8.0/Microsoft.ML.OnnxRuntime.dll": {
+            "related": ".pdb"
+          }
+        },
+        "build": {
+          "build/netstandard2.0/Microsoft.ML.OnnxRuntime.Managed.targets": {}
+        }
+      },
+      "OpenCvSharp4/4.13.0.20260627": {
+        "type": "package",
+        "dependencies": {
+          "System.Memory": "4.6.3"
+        },
+        "compile": {
+          "lib/net8.0/OpenCvSharp.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net8.0/OpenCvSharp.dll": {
+            "related": ".xml"
+          }
+        }
+      },
+      "OpenCvSharp4.runtime.win/4.13.0.20260627": {
+        "type": "package",
+        "build": {
+          "build/net8.0/OpenCvSharp4.runtime.win.props": {},
+          "build/net8.0/OpenCvSharp4.runtime.win.targets": {}
+        },
+        "runtimeTargets": {
+          "runtimes/win-x64/native/OpenCvSharpExtern.dll": {
+            "assetType": "native",
+            "rid": "win-x64"
+          },
+          "runtimes/win-x64/native/opencv_videoio_ffmpeg4130_64.dll": {
+            "assetType": "native",
+            "rid": "win-x64"
+          }
+        }
+      },
+      "System.Memory/4.6.3": {
+        "type": "package",
+        "compile": {
+          "lib/netcoreapp2.1/_._": {}
+        },
+        "runtime": {
+          "lib/netcoreapp2.1/_._": {}
+        }
+      },
+      "System.Numerics.Tensors/9.0.0": {
+        "type": "package",
+        "compile": {
+          "lib/net8.0/System.Numerics.Tensors.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net8.0/System.Numerics.Tensors.dll": {
+            "related": ".xml"
+          }
+        },
+        "build": {
+          "buildTransitive/net8.0/_._": {}
+        }
+      }
+    }
+  },
+  "libraries": {
+    "Microsoft.AI.DirectML/1.15.4": {
+      "sha512": "UblWBtQxcXcxwcn+jh0pfbq4zv2b6w7ThJ35qUV9gd8niGofrFWzVqZ6yqYDMiE+IJf8LRpG+H1cZpswceOeiA==",
+      "type": "package",
+      "path": "microsoft.ai.directml/1.15.4",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "LICENSE-CODE.txt",
+        "LICENSE.txt",
+        "README.md",
+        "ThirdPartyNotices.txt",
+        "bin/arm-win/DirectML.Debug.dll",
+        "bin/arm-win/DirectML.Debug.pdb",
+        "bin/arm-win/DirectML.dll",
+        "bin/arm-win/DirectML.lib",
+        "bin/arm-win/DirectML.pdb",
+        "bin/arm64-win/DirectML.Debug.dll",
+        "bin/arm64-win/DirectML.Debug.pdb",
+        "bin/arm64-win/DirectML.dll",
+        "bin/arm64-win/DirectML.lib",
+        "bin/arm64-win/DirectML.pdb",
+        "bin/arm64ec-win/DirectML.Debug.dll",
+        "bin/arm64ec-win/DirectML.Debug.pdb",
+        "bin/arm64ec-win/DirectML.dll",
+        "bin/arm64ec-win/DirectML.lib",
+        "bin/arm64ec-win/DirectML.pdb",
+        "bin/x64-linux/libdirectml.so",
+        "bin/x64-win/DirectML.Debug.dll",
+        "bin/x64-win/DirectML.Debug.pdb",
+        "bin/x64-win/DirectML.dll",
+        "bin/x64-win/DirectML.lib",
+        "bin/x64-win/DirectML.pdb",
+        "bin/x64-xbox-scarlett-230307/DirectML.Debug.dll",
+        "bin/x64-xbox-scarlett-230307/DirectML.Debug.pdb",
+        "bin/x64-xbox-scarlett-230307/DirectML.dll",
+        "bin/x64-xbox-scarlett-230307/DirectML.lib",
+        "bin/x64-xbox-scarlett-230307/DirectML.pdb",
+        "bin/x64-xbox-scarlett-230603/DirectML.Debug.dll",
+        "bin/x64-xbox-scarlett-230603/DirectML.Debug.pdb",
+        "bin/x64-xbox-scarlett-230603/DirectML.dll",
+        "bin/x64-xbox-scarlett-230603/DirectML.lib",
+        "bin/x64-xbox-scarlett-230603/DirectML.pdb",
+        "bin/x64-xbox-scarlett-231000/DirectML.Debug.dll",
+        "bin/x64-xbox-scarlett-231000/DirectML.Debug.pdb",
+        "bin/x64-xbox-scarlett-231000/DirectML.dll",
+        "bin/x64-xbox-scarlett-231000/DirectML.lib",
+        "bin/x64-xbox-scarlett-231000/DirectML.pdb",
+        "bin/x86-win/DirectML.Debug.dll",
+        "bin/x86-win/DirectML.Debug.pdb",
+        "bin/x86-win/DirectML.dll",
+        "bin/x86-win/DirectML.lib",
+        "bin/x86-win/DirectML.pdb",
+        "build/Microsoft.AI.DirectML.Rules.Project.xml",
+        "build/Microsoft.AI.DirectML.props",
+        "build/Microsoft.AI.DirectML.targets",
+        "include/DirectML.h",
+        "include/DirectMLConfig.h",
+        "microsoft.ai.directml.1.15.4.nupkg.sha512",
+        "microsoft.ai.directml.nuspec"
+      ]
+    },
+    "Microsoft.ML.OnnxRuntime.DirectML/1.24.4": {
+      "sha512": "rXEy9biJdgr55TdDaHrhl35K0FRXRCbvyRUv4S4C3jTxyxrqSh8YcEp5bzw4S9UlcqQKNfpb3sE+VWvO2DZY6A==",
+      "type": "package",
+      "path": "microsoft.ml.onnxruntime.directml/1.24.4",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "LICENSE",
+        "ORT_icon_for_light_bg.png",
+        "Privacy.md",
+        "README.md",
+        "ThirdPartyNotices.txt",
+        "build/native/Microsoft.ML.OnnxRuntime.DirectML.props",
+        "build/native/Microsoft.ML.OnnxRuntime.DirectML.targets",
+        "build/native/include/cpu_provider_factory.h",
+        "build/native/include/dml_provider_factory.h",
+        "build/native/include/onnxruntime_c_api.h",
+        "build/native/include/onnxruntime_cxx_api.h",
+        "build/native/include/onnxruntime_cxx_inline.h",
+        "build/native/include/onnxruntime_env_config_keys.h",
+        "build/native/include/onnxruntime_ep_c_api.h",
+        "build/native/include/onnxruntime_ep_device_ep_metadata_keys.h",
+        "build/native/include/onnxruntime_float16.h",
+        "build/native/include/onnxruntime_lite_custom_op.h",
+        "build/native/include/onnxruntime_run_options_config_keys.h",
+        "build/native/include/onnxruntime_session_options_config_keys.h",
+        "build/native/include/provider_options.h",
+        "build/netstandard2.0/Microsoft.ML.OnnxRuntime.DirectML.props",
+        "build/netstandard2.0/Microsoft.ML.OnnxRuntime.DirectML.targets",
+        "build/netstandard2.1/Microsoft.ML.OnnxRuntime.DirectML.props",
+        "build/netstandard2.1/Microsoft.ML.OnnxRuntime.DirectML.targets",
+        "microsoft.ml.onnxruntime.directml.1.24.4.nupkg.sha512",
+        "microsoft.ml.onnxruntime.directml.nuspec",
+        "runtimes/win-arm64/native/onnxruntime.dll",
+        "runtimes/win-arm64/native/onnxruntime.lib",
+        "runtimes/win-arm64/native/onnxruntime_providers_shared.dll",
+        "runtimes/win-x64/native/onnxruntime.dll",
+        "runtimes/win-x64/native/onnxruntime.lib",
+        "runtimes/win-x64/native/onnxruntime_providers_shared.dll"
+      ]
+    },
+    "Microsoft.ML.OnnxRuntime.Managed/1.24.4": {
+      "sha512": "e5jsEo0HcCKDMkuRsMSievKoMv10Odv4MGmxbCin8SEm4Pto1qTpwti47xRwMtk9I/zVvfAiFIWquOq/0+22DA==",
+      "type": "package",
+      "path": "microsoft.ml.onnxruntime.managed/1.24.4",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "LICENSE.txt",
+        "ORT_icon_for_light_bg.png",
+        "Privacy.md",
+        "README.md",
+        "ThirdPartyNotices.txt",
+        "build/netstandard2.0/Microsoft.ML.OnnxRuntime.Managed.targets",
+        "lib/net8.0/Microsoft.ML.OnnxRuntime.dll",
+        "lib/net8.0/Microsoft.ML.OnnxRuntime.pdb",
+        "lib/netstandard2.0/Microsoft.ML.OnnxRuntime.dll",
+        "lib/netstandard2.0/Microsoft.ML.OnnxRuntime.pdb",
+        "microsoft.ml.onnxruntime.managed.1.24.4.nupkg.sha512",
+        "microsoft.ml.onnxruntime.managed.nuspec"
+      ]
+    },
+    "OpenCvSharp4/4.13.0.20260627": {
+      "sha512": "nYk95jkyYY9f0sF5KqZ3OB1SWkmqsfV7eN0ROiQds/rxpSn0v1G0QIedMbwuqbdPhvQnOIG2DDmpkLnHEJMh8Q==",
+      "type": "package",
+      "path": "opencvsharp4/4.13.0.20260627",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "README.managed.md",
+        "analyzers/dotnet/cs/OpenCvSharp.Analyzers.dll",
+        "lib/net8.0/OpenCvSharp.dll",
+        "lib/net8.0/OpenCvSharp.xml",
+        "lib/netstandard2.0/OpenCvSharp.dll",
+        "lib/netstandard2.0/OpenCvSharp.xml",
+        "lib/netstandard2.1/OpenCvSharp.dll",
+        "lib/netstandard2.1/OpenCvSharp.xml",
+        "opencvsharp.png",
+        "opencvsharp4.4.13.0.20260627.nupkg.sha512",
+        "opencvsharp4.nuspec"
+      ]
+    },
+    "OpenCvSharp4.runtime.win/4.13.0.20260627": {
+      "sha512": "POIxR+CTpwHJIdam6wd8U2fprWv5QnIUw50jw79WEGb37He3T1h11SdtwSj9p2PLSfrzonMjO2t71wqi5uFsoQ==",
+      "type": "package",
+      "path": "opencvsharp4.runtime.win/4.13.0.20260627",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "README.runtime.md",
+        "build/net8.0/OpenCvSharp4.runtime.win.props",
+        "build/net8.0/OpenCvSharp4.runtime.win.targets",
+        "build/netcoreapp/OpenCvSharp4.runtime.win.props",
+        "build/netcoreapp/OpenCvSharp4.runtime.win.targets",
+        "build/netstandard/OpenCvSharp4.runtime.win.props",
+        "build/netstandard/OpenCvSharp4.runtime.win.targets",
+        "opencvsharp.png",
+        "opencvsharp4.runtime.win.4.13.0.20260627.nupkg.sha512",
+        "opencvsharp4.runtime.win.nuspec",
+        "runtimes/win-x64/native/OpenCvSharpExtern.dll",
+        "runtimes/win-x64/native/opencv_videoio_ffmpeg4130_64.dll"
+      ]
+    },
+    "System.Memory/4.6.3": {
+      "sha512": "qdcDOgnFZY40+Q9876JUHnlHu7bosOHX8XISRoH94fwk6hgaeQGSgfZd8srWRZNt5bV9ZW2TljcegDNxsf+96A==",
+      "type": "package",
+      "path": "system.memory/4.6.3",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "Icon.png",
+        "PACKAGE.md",
+        "buildTransitive/net461/System.Memory.targets",
+        "buildTransitive/net462/_._",
+        "lib/net462/System.Memory.dll",
+        "lib/net462/System.Memory.xml",
+        "lib/netcoreapp2.1/_._",
+        "lib/netstandard2.0/System.Memory.dll",
+        "lib/netstandard2.0/System.Memory.xml",
+        "lib/netstandard2.1/_._",
+        "system.memory.4.6.3.nupkg.sha512",
+        "system.memory.nuspec"
+      ]
+    },
+    "System.Numerics.Tensors/9.0.0": {
+      "sha512": "hyJB4UlpAi19Xr9AXzu2NuagKC4lPfHObNMEAA0HmqFz2rX7wKgzeYzO/jM/eBHDhnUGFFEjk5cOoJaxqg5J4A==",
+      "type": "package",
+      "path": "system.numerics.tensors/9.0.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "Icon.png",
+        "LICENSE.TXT",
+        "PACKAGE.md",
+        "THIRD-PARTY-NOTICES.TXT",
+        "buildTransitive/net461/System.Numerics.Tensors.targets",
+        "buildTransitive/net462/_._",
+        "buildTransitive/net8.0/_._",
+        "buildTransitive/netcoreapp2.0/System.Numerics.Tensors.targets",
+        "lib/net462/System.Numerics.Tensors.dll",
+        "lib/net462/System.Numerics.Tensors.xml",
+        "lib/net8.0/System.Numerics.Tensors.dll",
+        "lib/net8.0/System.Numerics.Tensors.xml",
+        "lib/net9.0/System.Numerics.Tensors.dll",
+        "lib/net9.0/System.Numerics.Tensors.xml",
+        "lib/netstandard2.0/System.Numerics.Tensors.dll",
+        "lib/netstandard2.0/System.Numerics.Tensors.xml",
+        "system.numerics.tensors.9.0.0.nupkg.sha512",
+        "system.numerics.tensors.nuspec",
+        "useSharedDesignerContext.txt"
+      ]
+    }
+  },
+  "projectFileDependencyGroups": {
+    "net8.0-windows7.0": [
+      "Microsoft.ML.OnnxRuntime.DirectML >= 1.24.4",
+      "OpenCvSharp4 >= 4.13.0.20260627",
+      "OpenCvSharp4.runtime.win >= 4.13.0.20260627"
+    ]
+  },
+  "packageFolders": {
+    "C:\\Users\\david\\.nuget\\packages\\": {}
+  },
+  "project": {
+    "version": "1.0.0",
+    "restore": {
+      "projectUniqueName": "C:\\Users\\david\\Desktop\\Projects-Claude\\anesok-link\\WiFiCameraLink.csproj",
+      "projectName": "WiFiCameraLink",
+      "projectPath": "C:\\Users\\david\\Desktop\\Projects-Claude\\anesok-link\\WiFiCameraLink.csproj",
+      "packagesPath": "C:\\Users\\david\\.nuget\\packages\\",
+      "outputPath": "C:\\Users\\david\\Desktop\\Projects-Claude\\anesok-link\\obj\\",
+      "projectStyle": "PackageReference",
+      "configFilePaths": [
+        "C:\\Users\\david\\AppData\\Roaming\\NuGet\\NuGet.Config",
+        "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
+      ],
+      "originalTargetFrameworks": [
+        "net8.0-windows"
+      ],
+      "sources": {
+        "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
+        "https://api.nuget.org/v3/index.json": {}
+      },
+      "frameworks": {
+        "net8.0-windows7.0": {
+          "targetAlias": "net8.0-windows",
+          "projectReferences": {}
+        }
+      },
+      "warningProperties": {
+        "warnAsError": [
+          "NU1605"
+        ]
+      },
+      "restoreAuditProperties": {
+        "enableAudit": "true",
+        "auditLevel": "low",
+        "auditMode": "direct"
+      }
+    },
+    "frameworks": {
+      "net8.0-windows7.0": {
+        "targetAlias": "net8.0-windows",
+        "dependencies": {
+          "Microsoft.ML.OnnxRuntime.DirectML": {
+            "target": "Package",
+            "version": "[1.24.4, )"
+          },
+          "OpenCvSharp4": {
+            "target": "Package",
+            "version": "[4.13.0.20260627, )"
+          },
+          "OpenCvSharp4.runtime.win": {
+            "target": "Package",
+            "version": "[4.13.0.20260627, )"
+          }
+        },
+        "imports": [
+          "net461",
+          "net462",
+          "net47",
+          "net471",
+          "net472",
+          "net48",
+          "net481"
+        ],
+        "assetTargetFallback": true,
+        "warn": true,
+        "frameworkReferences": {
+          "Microsoft.NETCore.App": {
+            "privateAssets": "all"
+          },
+          "Microsoft.WindowsDesktop.App.WindowsForms": {
+            "privateAssets": "none"
+          }
+        },
+        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.425/PortableRuntimeIdentifierGraph.json"
+      }
+    }
+  }
+}

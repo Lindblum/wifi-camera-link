@@ -1,0 +1,162 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v8.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v8.0": {
+      "WiFiCameraLink/1.0.0": {
+        "dependencies": {
+          "Microsoft.ML.OnnxRuntime.DirectML": "1.24.4",
+          "OpenCvSharp4": "4.13.0.20260627",
+          "OpenCvSharp4.runtime.win": "4.13.0.20260627"
+        },
+        "runtime": {
+          "WiFiCameraLink.dll": {}
+        }
+      },
+      "Microsoft.AI.DirectML/1.15.4": {},
+      "Microsoft.ML.OnnxRuntime.DirectML/1.24.4": {
+        "dependencies": {
+          "Microsoft.AI.DirectML": "1.15.4",
+          "Microsoft.ML.OnnxRuntime.Managed": "1.24.4"
+        },
+        "runtimeTargets": {
+          "runtimes/win-arm64/native/onnxruntime.dll": {
+            "rid": "win-arm64",
+            "assetType": "native",
+            "fileVersion": "1.24.26.316"
+          },
+          "runtimes/win-arm64/native/onnxruntime.lib": {
+            "rid": "win-arm64",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/win-arm64/native/onnxruntime_providers_shared.dll": {
+            "rid": "win-arm64",
+            "assetType": "native",
+            "fileVersion": "1.24.26.316"
+          },
+          "runtimes/win-x64/native/onnxruntime.dll": {
+            "rid": "win-x64",
+            "assetType": "native",
+            "fileVersion": "1.24.26.316"
+          },
+          "runtimes/win-x64/native/onnxruntime.lib": {
+            "rid": "win-x64",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/win-x64/native/onnxruntime_providers_shared.dll": {
+            "rid": "win-x64",
+            "assetType": "native",
+            "fileVersion": "1.24.26.316"
+          }
+        }
+      },
+      "Microsoft.ML.OnnxRuntime.Managed/1.24.4": {
+        "dependencies": {
+          "System.Memory": "4.6.3",
+          "System.Numerics.Tensors": "9.0.0"
+        },
+        "runtime": {
+          "lib/net8.0/Microsoft.ML.OnnxRuntime.dll": {
+            "assemblyVersion": "1.24.4.0",
+            "fileVersion": "1.24.4.0"
+          }
+        }
+      },
+      "OpenCvSharp4/4.13.0.20260627": {
+        "dependencies": {
+          "System.Memory": "4.6.3"
+        },
+        "runtime": {
+          "lib/net8.0/OpenCvSharp.dll": {
+            "assemblyVersion": "4.0.0.0",
+            "fileVersion": "4.0.0.0"
+          }
+        }
+      },
+      "OpenCvSharp4.runtime.win/4.13.0.20260627": {
+        "runtimeTargets": {
+          "runtimes/win-x64/native/OpenCvSharpExtern.dll": {
+            "rid": "win-x64",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/win-x64/native/opencv_videoio_ffmpeg4130_64.dll": {
+            "rid": "win-x64",
+            "assetType": "native",
+            "fileVersion": "2025.12.0.0"
+          }
+        }
+      },
+      "System.Memory/4.6.3": {},
+      "System.Numerics.Tensors/9.0.0": {
+        "runtime": {
+          "lib/net8.0/System.Numerics.Tensors.dll": {
+            "assemblyVersion": "9.0.0.0",
+            "fileVersion": "9.0.24.52809"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "WiFiCameraLink/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Microsoft.AI.DirectML/1.15.4": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-UblWBtQxcXcxwcn+jh0pfbq4zv2b6w7ThJ35qUV9gd8niGofrFWzVqZ6yqYDMiE+IJf8LRpG+H1cZpswceOeiA==",
+      "path": "microsoft.ai.directml/1.15.4",
+      "hashPath": "microsoft.ai.directml.1.15.4.nupkg.sha512"
+    },
+    "Microsoft.ML.OnnxRuntime.DirectML/1.24.4": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-rXEy9biJdgr55TdDaHrhl35K0FRXRCbvyRUv4S4C3jTxyxrqSh8YcEp5bzw4S9UlcqQKNfpb3sE+VWvO2DZY6A==",
+      "path": "microsoft.ml.onnxruntime.directml/1.24.4",
+      "hashPath": "microsoft.ml.onnxruntime.directml.1.24.4.nupkg.sha512"
+    },
+    "Microsoft.ML.OnnxRuntime.Managed/1.24.4": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-e5jsEo0HcCKDMkuRsMSievKoMv10Odv4MGmxbCin8SEm4Pto1qTpwti47xRwMtk9I/zVvfAiFIWquOq/0+22DA==",
+      "path": "microsoft.ml.onnxruntime.managed/1.24.4",
+      "hashPath": "microsoft.ml.onnxruntime.managed.1.24.4.nupkg.sha512"
+    },
+    "OpenCvSharp4/4.13.0.20260627": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-nYk95jkyYY9f0sF5KqZ3OB1SWkmqsfV7eN0ROiQds/rxpSn0v1G0QIedMbwuqbdPhvQnOIG2DDmpkLnHEJMh8Q==",
+      "path": "opencvsharp4/4.13.0.20260627",
+      "hashPath": "opencvsharp4.4.13.0.20260627.nupkg.sha512"
+    },
+    "OpenCvSharp4.runtime.win/4.13.0.20260627": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-POIxR+CTpwHJIdam6wd8U2fprWv5QnIUw50jw79WEGb37He3T1h11SdtwSj9p2PLSfrzonMjO2t71wqi5uFsoQ==",
+      "path": "opencvsharp4.runtime.win/4.13.0.20260627",
+      "hashPath": "opencvsharp4.runtime.win.4.13.0.20260627.nupkg.sha512"
+    },
+    "System.Memory/4.6.3": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-qdcDOgnFZY40+Q9876JUHnlHu7bosOHX8XISRoH94fwk6hgaeQGSgfZd8srWRZNt5bV9ZW2TljcegDNxsf+96A==",
+      "path": "system.memory/4.6.3",
+      "hashPath": "system.memory.4.6.3.nupkg.sha512"
+    },
+    "System.Numerics.Tensors/9.0.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-hyJB4UlpAi19Xr9AXzu2NuagKC4lPfHObNMEAA0HmqFz2rX7wKgzeYzO/jM/eBHDhnUGFFEjk5cOoJaxqg5J4A==",
+      "path": "system.numerics.tensors/9.0.0",
+      "hashPath": "system.numerics.tensors.9.0.0.nupkg.sha512"
+    }
+  }
+}

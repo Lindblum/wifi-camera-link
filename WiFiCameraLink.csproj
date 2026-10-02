@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <RootNamespace>WiFiCameraLink</RootNamespace>
+    <AssemblyName>WiFiCameraLink</AssemblyName>
+    <Product>WiFi Camera Link</Product>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- OpenCvSharp ships an analyzer built for a newer compiler than the .NET 8 SDK's; it's optional. -->
+    <NoWarn>$(NoWarn);CS9057</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.24.4" />
+    <PackageReference Include="OpenCvSharp4" Version="4.13.0.20260627" />
+    <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.13.0.20260627" />
+  </ItemGroup>
+
+</Project>
