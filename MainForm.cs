@@ -59,6 +59,7 @@ public sealed class MainForm : Form
     readonly CheckBox _interpolateBox = Check("Double frame rate");
     readonly CheckBox _stretchBox = Check("Stretch to fill");
     readonly CheckBox _lightBox = Check("On");
+    readonly CheckBox _timestampBox = Check("Timestamp");
     readonly TrackBar _lightSlider = Slider();
     readonly Label _perfCamera = Metric("Camera: -");
     readonly Label _perfShown = Metric("Shown: -");
@@ -110,6 +111,8 @@ public sealed class MainForm : Form
     bool _lightBusy;        // a light command is waiting for the camera's answer
     bool _lightDirty;       // the controls changed meanwhile; send again once it answers
     bool _lightUpdating;    // showing the camera's reported state, not a user change
+    VStarcamCamera? _timestampCamera; // the streaming camera whose on-picture date/time the Timestamp box switches
+    bool _timestampUpdating; // showing the camera's state, not a user change
 
     static readonly TimeSpan StallTimeout = TimeSpan.FromSeconds(10);
 
@@ -139,6 +142,7 @@ public sealed class MainForm : Form
         _tips.SetToolTip(_perfDropped, "Camera frames skipped because processing was still busy with the previous one");
         _tips.SetToolTip(_lightBox, "The camera's built-in light (i4Season cameras; not every model can be switched remotely)");
         _tips.SetToolTip(_lightSlider, "Light brightness");
+        _tips.SetToolTip(_timestampBox, "The date and time the camera draws on the picture (VStarcam cameras; the camera remembers it)");
         KeyPreview = true;
         KeyDown += (_, e) =>
         {
@@ -239,6 +243,8 @@ public sealed class MainForm : Form
         _lightBox.CheckedChanged += async (_, _) => await ApplyLightAsync();
         _lightSlider.ValueChanged += async (_, _) => await ApplyLightAsync();
         UpdateLightControls();
+        _timestampBox.Enabled = false;
+        _timestampBox.CheckedChanged += async (_, _) => await ApplyTimestampAsync();
         _sbsBox.CheckedChanged += async (_, _) =>
         {
             ApplyEnhanceOptions();
@@ -261,7 +267,7 @@ public sealed class MainForm : Form
         [
             Section("Camera Wi-Fi", Label("Adapter"), _adapterBox, Label("Network"), _networkBox, _scanButton, _showAll),
             Section("Connection", Label("Password"), _passwordBox, _connectButton, _disconnectButton, _autoConnect),
-            Section("Camera", Label("Type"), _cameraTypeBox, Label("URL"), _streamUrlBox),
+            Section("Camera", Label("Type"), _cameraTypeBox, Label("URL"), _streamUrlBox, _timestampBox),
             Section("Diagnostics", _probeButton, _fullScan),
             Section("Light", _lightBox, Label("Brightness"), _lightSlider),
             Section("Video", _startButton, _stopButton, _rotateButton, _fullScreenButton, _stretchBox),
@@ -780,6 +786,8 @@ public sealed class MainForm : Form
                     RememberCamera(ssid, source);
                     if (source is I4SeasonCamera camera && !ct.IsCancellationRequested)
                         EnableLight(camera);
+                    if (source is VStarcamCamera vstarcam && !ct.IsCancellationRequested)
+                        EnableTimestamp(vstarcam);
                 }));
             ShowFrame(frame);
         }
@@ -803,6 +811,48 @@ public sealed class MainForm : Form
             source.BatteryChanged -= OnBattery;
             if (_lightCamera == source)
                 EnableLight(null);
+            if (_timestampCamera == source)
+                EnableTimestamp(null);
+        }
+    }
+
+    /// <summary>Points the Timestamp box at a streaming camera (or none), showing the camera's current setting.</summary>
+    void EnableTimestamp(VStarcamCamera? camera)
+    {
+        _timestampCamera = camera;
+        _timestampBox.Enabled = camera?.TimestampShown != null;
+        if (camera?.TimestampShown is { } shown)
+            ShowTimestampState(shown);
+    }
+
+    void ShowTimestampState(bool shown)
+    {
+        _timestampUpdating = true;
+        _timestampBox.Checked = shown;
+        _timestampUpdating = false;
+    }
+
+    async Task ApplyTimestampAsync()
+    {
+        if (_timestampUpdating || _timestampCamera is not { } camera)
+            return;
+        bool show = _timestampBox.Checked;
+        _timestampBox.Enabled = false; // one change at a time; the camera's CGI server is easily overwhelmed
+        try
+        {
+            if (await camera.SetTimestampAsync(show, CancellationToken.None))
+            {
+                Log(show ? "Camera timestamp on." : "Camera timestamp off.");
+            }
+            else
+            {
+                Log("The camera didn't accept the timestamp change.");
+                ShowTimestampState(!show);
+            }
+        }
+        finally
+        {
+            _timestampBox.Enabled = _timestampCamera == camera;
         }
     }
 

@@ -17,7 +17,9 @@ namespace WiFiCameraLink;
 /// </summary>
 /// <remarks>
 /// The camera's tiny CGI server stops answering for a while when it gets too many requests, so this asks
-/// for as little as possible: one status request, the stream, and a battery reading every 15 seconds.
+/// for as little as possible: a status request, the stream, and a battery reading every 15 seconds.
+/// The camera also ends each livestream.cgi connection after about two minutes; the relay reconnects
+/// behind the decoder's back, so the video only pauses briefly.
 /// Background: https://palant.info/2025/11/05/an-overview-of-the-pppp-protocol-for-iot-cameras/
 /// </remarks>
 public sealed class VStarcamCamera : ICameraSource
@@ -41,6 +43,9 @@ public sealed class VStarcamCamera : ICameraSource
 
     public string Description => $"VStarcam camera at {_camera}";
 
+    /// <summary>Whether the camera draws its date/time on the picture; null until the stream has started.</summary>
+    public bool? TimestampShown { get; private set; }
+
     public event Action<CameraFrame>? FrameReceived;
     public event Action<string>? Log;
     public event Action<int>? BatteryChanged;
@@ -63,6 +68,8 @@ public sealed class VStarcamCamera : ICameraSource
         Log?.Invoke($"Camera: VStarcam {Field(status, "deviceid")}, firmware {Field(status, "sys_ver")}, " +
                     $"sensor {Field(status, "sensor_name")} {Field(status, "sensor_width")}x{Field(status, "sensor_hight")}");
         ReportBattery(status);
+        if (await CgiAsync("get_camera_params.cgi", ct) is { } parameters && Field(parameters, "OSDEnable") is "0" or "1")
+            TimestampShown = Field(parameters, "OSDEnable") == "1";
 
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start(1);
@@ -93,56 +100,106 @@ public sealed class VStarcamCamera : ICameraSource
         void ForwardLog(string message) => Log?.Invoke(message);
     }
 
-    /// <summary>Waits for the decoder to connect, then copies the camera's H.264 to it without the frame headers.</summary>
+    /// <summary>
+    /// Waits for the decoder to connect, then copies the camera's H.264 to it without the frame headers,
+    /// reconnecting to the camera whenever it ends the stream (it does so every two minutes).
+    /// Leaving closes the decoder's connection, so its read ends and StreamAsync returns.
+    /// </summary>
     async Task RelayAsync(TcpListener listener, CancellationToken ct)
     {
         using var decoder = await listener.AcceptTcpClientAsync(ct);
+        var output = decoder.GetStream();
+        bool reconnectLogged = false;
+        long total = 0;
+        for (int failures = 0; failures < 3 && !ct.IsCancellationRequested;)
+        {
+            var (frames, error) = await RelayConnectionAsync(output, total == 0, ct);
+            total += frames;
+            if (ct.IsCancellationRequested || error == null)
+                return; // stopped, or the decoder went away
+            if (frames == 0)
+            {
+                failures++;
+                Log?.Invoke($"The camera's video didn't start: {error}");
+                await Task.Delay(1000, ct);
+                continue;
+            }
+            failures = 0;
+            if (!reconnectLogged)
+                Log?.Invoke($"The camera ended its video connection ({error}); it does this every two minutes. " +
+                            "Reconnecting without stopping the video.");
+            reconnectLogged = true;
+        }
+    }
+
+    /// <summary>
+    /// Relays one livestream.cgi connection. Returns the frames relayed and why the camera's side ended,
+    /// or a null reason if relaying should stop for good (cancelled, decoder closed, or garbled data).
+    /// </summary>
+    async Task<(long Frames, string? Error)> RelayConnectionAsync(NetworkStream output, bool first, CancellationToken ct)
+    {
         using var camera = NewTcpClient();
+        var header = new byte[FrameHeaderSize];
+        var payload = new byte[256 * 1024];
+        bool keyFrameSeen = false;
+        long frames = 0;
         try
         {
             await camera.ConnectAsync(_camera, CgiPort, ct);
             var cameraStream = camera.GetStream();
             await cameraStream.WriteAsync(Encoding.ASCII.GetBytes(Request("livestream.cgi", "streamid=10&substream=0")), ct);
-            var output = decoder.GetStream();
-
-            var header = new byte[FrameHeaderSize];
-            var payload = new byte[256 * 1024];
-            bool keyFrameSeen = false;
-            long frames = 0;
             while (true)
             {
                 await cameraStream.ReadExactlyAsync(header, ct);
                 if (BinaryPrimitives.ReadUInt32LittleEndian(header) != FrameMagic)
                 {
                     Log?.Invoke($"The camera's video stream has an unexpected frame header: {Convert.ToHexString(header, 0, 8)}.");
-                    return;
+                    return (frames, null);
                 }
                 int type = header[4];
                 int length = BinaryPrimitives.ReadInt32LittleEndian(header.AsSpan(16));
                 if (length is < 0 or > MaxFrameSize)
                 {
                     Log?.Invoke($"The camera sent a frame of {length} bytes; stopping.");
-                    return;
+                    return (frames, null);
                 }
                 if (payload.Length < length)
                     payload = new byte[length];
                 await cameraStream.ReadExactlyAsync(payload.AsMemory(0, length), ct);
 
                 // 0 = key frame (starts with SPS/PPS), 1 = other video frames; anything else (audio) is skipped.
+                // Each connection starts at a key frame, which is also what lets the decoder carry on after a reconnect.
                 if (type > 1 || (!keyFrameSeen && type != 0))
                     continue;
                 keyFrameSeen = true;
-                if (++frames == 1)
+                if (++frames == 1 && first)
                     Log?.Invoke("Video is arriving.");
-                await output.WriteAsync(payload.AsMemory(0, length), ct);
+                try
+                {
+                    await output.WriteAsync(payload.AsMemory(0, length), ct);
+                }
+                catch (IOException)
+                {
+                    return (frames, null); // the decoder closed its end
+                }
             }
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { return (frames, null); }
         catch (Exception ex) when (ex is IOException or SocketException or EndOfStreamException)
         {
-            if (!ct.IsCancellationRequested)
-                Log?.Invoke($"The camera's video connection ended: {ex.Message}");
+            return (frames, ex is EndOfStreamException ? "end of stream" : ex.Message);
         }
-        // Leaving closes the decoder's connection, so its read ends and StreamAsync returns.
+    }
+
+    /// <summary>Shows or hides the date/time the camera draws on the picture. Returns false if the camera refused.</summary>
+    public async Task<bool> SetTimestampAsync(bool show, CancellationToken ct)
+    {
+        // camera_control.cgi parameter 10 is the on-screen display (the camera stores it).
+        string? reply = await CgiAsync("camera_control.cgi", ct, $"param=10&value={(show ? 1 : 0)}");
+        bool ok = reply != null && reply.Contains("\"ok\"");
+        if (ok)
+            TimestampShown = show;
+        return ok;
     }
 
     async Task PollBatteryAsync(CancellationToken ct)
@@ -162,7 +219,7 @@ public sealed class VStarcamCamera : ICameraSource
     }
 
     /// <summary>Returns the body of a CGI response, or null if the camera doesn't answer.</summary>
-    async Task<string?> CgiAsync(string cgi, CancellationToken ct)
+    async Task<string?> CgiAsync(string cgi, CancellationToken ct, string? query = null)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(4000);
@@ -171,7 +228,7 @@ public sealed class VStarcamCamera : ICameraSource
         {
             await client.ConnectAsync(_camera, CgiPort, timeout.Token);
             var stream = client.GetStream();
-            await stream.WriteAsync(Encoding.ASCII.GetBytes(Request(cgi, null)), timeout.Token);
+            await stream.WriteAsync(Encoding.ASCII.GetBytes(Request(cgi, query)), timeout.Token);
             using var reader = new StreamReader(stream, Encoding.ASCII);
             string response = await reader.ReadToEndAsync(timeout.Token);
             int body = response.IndexOf("\r\n\r\n", StringComparison.Ordinal);

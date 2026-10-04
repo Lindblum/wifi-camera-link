@@ -167,6 +167,8 @@ public sealed class VideoPipeline : IDisposable
 
     public void Submit(CameraFrame frame)
     {
+        if (_disposed)
+            return; // a frame that arrived while the app was closing
         // Stamp the arrival time now: frame timing must count any wait for the worker to free up.
         var replaced = Interlocked.Exchange(ref _pending, new PendingFrame(frame, Stopwatch.GetTimestamp()));
         lock (_statsLock)
@@ -175,7 +177,8 @@ public sealed class VideoPipeline : IDisposable
             if (replaced != null)
                 _statDropped++; // the worker was still busy with an earlier frame
         }
-        _wake.Set();
+        try { _wake.Set(); }
+        catch (ObjectDisposedException) { } // Dispose ran between the check above and here
     }
 
     void Run()
