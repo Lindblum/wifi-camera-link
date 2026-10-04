@@ -23,7 +23,9 @@ public sealed class MainForm : Form
     // Line icons from Segoe Fluent Icons (Windows 11), falling back to Segoe MDL2 Assets (Windows 10).
     const string IconScan = "\uE72C", IconConnect = "\uE701", IconDisconnect = "\uEB5E", IconPlay = "\uE768",
         IconStop = "\uE71A", IconSnapshot = "\uE722", IconRecord = "\uE7C8", IconRotate = "\uE7AD",
-        IconFullScreen = "\uE740", IconProbe = "\uE9D9", IconPictures = "\uE8B9", IconVideos = "\uE8B2";
+        IconFullScreen = "\uE740", IconProbe = "\uE9D9", IconPictures = "\uE8B9", IconVideos = "\uE8B2",
+        IconDenoise = "\uF4A5", IconSharpen = "\uE793", IconStabilize = "\uE7B7", IconInterpolate = "\uE916",
+        Icon3D = "\uF158", IconHalfWidth = "\uF57C", IconSwapEyes = "\uE8AB";
     static readonly Font IconFont = new(
         FontFamily.Families.Any(f => f.Name == "Segoe Fluent Icons") ? "Segoe Fluent Icons" : "Segoe MDL2 Assets", 12f);
 
@@ -51,12 +53,12 @@ public sealed class MainForm : Form
     readonly ToolStripStatusLabel _recordLabel = new() { ForeColor = Color.Red };
     readonly Button _rotateButton = IconButton(IconRotate);
     readonly Button _fullScreenButton = IconButton(IconFullScreen);
-    readonly CheckBox _denoiseBox = Check("Reduce grain");
+    readonly CheckBox _denoiseBox = IconToggle(IconDenoise);
     readonly TrackBar _denoiseSlider = Slider();
-    readonly CheckBox _sharpenBox = Check("Sharpen");
+    readonly CheckBox _sharpenBox = IconToggle(IconSharpen);
     readonly TrackBar _sharpenSlider = Slider();
-    readonly CheckBox _stabilizeBox = Check("Stabilize");
-    readonly CheckBox _interpolateBox = Check("Double frame rate");
+    readonly CheckBox _stabilizeBox = IconToggle(IconStabilize);
+    readonly CheckBox _interpolateBox = IconToggle(IconInterpolate);
     readonly CheckBox _stretchBox = Check("Stretch to fill");
     readonly CheckBox _lightBox = Check("On");
     readonly CheckBox _timestampBox = Check("Timestamp");
@@ -66,10 +68,10 @@ public sealed class MainForm : Form
     readonly Label _perfLatency = Metric("Latency: -", 175);
     readonly Label _perfDepth = Metric("Depth: -");
     readonly Label _perfDropped = Metric("Skipped: -");
-    readonly CheckBox _sbsBox = Check("Convert to 3D");
+    readonly CheckBox _sbsBox = IconToggle(Icon3D);
     readonly TrackBar _depthSlider = Slider(MaxIntensity);
-    readonly CheckBox _halfSbsBox = Check("Half width");
-    readonly CheckBox _swapEyesBox = Check("Swap eyes");
+    readonly CheckBox _halfSbsBox = IconToggle(IconHalfWidth);
+    readonly CheckBox _swapEyesBox = IconToggle(IconSwapEyes);
     readonly VideoPipeline _pipeline = new();
     readonly SplitContainer _split = new() { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal };
     readonly StatusStrip _statusStrip = new();
@@ -124,12 +126,17 @@ public sealed class MainForm : Form
 
         Directory.CreateDirectory(AppPaths.AppDir);
         BuildLayout();
-        foreach (var (button, tip) in new (Button, string)[]
+        foreach (var (button, tip) in new (Control, string)[]
         {
             (_scanButton, "Scan for Wi-Fi networks"), (_connectButton, "Connect to the camera's Wi-Fi"),
             (_disconnectButton, "Disconnect from the camera's Wi-Fi"), (_startButton, "Start video"),
             (_stopButton, "Stop video"), (_snapshotButton, "Snapshot"), (_folderButton, "Open the snapshots folder"),
             (_recordingsButton, "Open the recordings folder"), (_fullScreenButton, "Full screen (F11)"),
+            (_denoiseBox, "Reduce grain"), (_sharpenBox, "Sharpen"), (_stabilizeBox, "Stabilize (steady a shaky picture)"),
+            (_interpolateBox, "Double frame rate: insert a motion-estimated frame between camera frames; 20 fps becomes 40, about 50 ms later"),
+            (_sbsBox, "Convert to 3D (side-by-side, for VR headsets and 3D TVs)"), (_halfSbsBox, "Half width: squeeze both eyes into one normal-width frame"),
+            (_swapEyesBox, "Swap eyes (cross-eyed viewing)"), (_denoiseSlider, "Grain reduction strength"),
+            (_sharpenSlider, "Sharpening amount"), (_depthSlider, "3D intensity"),
         })
             Describe(button, tip);
         ShowRecordButton(recording: false);
@@ -137,7 +144,6 @@ public sealed class MainForm : Form
         _tips.SetToolTip(_fullScan, "Probe every TCP and UDP port (takes a few minutes)");
         _tips.SetToolTip(_showAll, "List every Wi-Fi network, not just ones that look like cameras");
         _tips.SetToolTip(_stretchBox, "Reshape the picture to fill the video area (also applies to snapshots and recordings)");
-        _tips.SetToolTip(_interpolateBox, "Insert a motion-estimated frame between camera frames: 20 fps becomes 40, about 50 ms later");
         _tips.SetToolTip(_perfLatency, "Time from a camera frame arriving to the finished frame reaching the display");
         _tips.SetToolTip(_perfDropped, "Camera frames skipped because processing was still busy with the previous one");
         _tips.SetToolTip(_lightBox, "The camera's built-in light (i4Season cameras; not every model can be switched remotely)");
@@ -273,10 +279,12 @@ public sealed class MainForm : Form
             Section("Video", _startButton, _stopButton, _rotateButton, _fullScreenButton, _stretchBox),
             Section("Capture", _snapshotButton, _recordButton, _folderButton, _recordingsButton),
             Section("Enhance", _denoiseBox, _denoiseSlider, _sharpenBox, _sharpenSlider, _stabilizeBox, _interpolateBox),
-            Section("3D (side-by-side)", _sbsBox, Label("Intensity"), _depthSlider, _halfSbsBox, _swapEyesBox),
+            Section("3D (side-by-side)", _sbsBox, _depthSlider, _halfSbsBox, _swapEyesBox),
             Section("Performance", _perfCamera, _perfShown, _perfLatency, _perfDepth, _perfDropped),
         ]);
         _rows.Add(toolbar);
+        foreach (var box in toolbar.Controls.OfType<GroupBox>())
+            ShowTooltipsWhenDisabled(box.Controls[0]);
         // Sections hold different controls (buttons, sliders, labels), so their natural heights differ;
         // give them all the tallest one's height so the rows line up.
         Load += (_, _) =>
@@ -331,8 +339,43 @@ public sealed class MainForm : Form
         Padding = new Padding(6, 3, 6, 1),
     };
 
+    /// <summary>A checkbox drawn as an icon button that stays pressed while it's on.</summary>
+    static CheckBox IconToggle(string glyph) => new()
+    {
+        Appearance = Appearance.Button, Text = glyph, Font = IconFont, AutoSize = true,
+        Padding = new Padding(6, 3, 6, 1), TextAlign = ContentAlignment.MiddleCenter,
+        Margin = new Padding(3, 3, 0, 3),
+    };
+
+    /// <summary>
+    /// WinForms shows no tooltip over a disabled control, because it gets no mouse messages; its panel does,
+    /// so the panel shows the disabled control's tooltip instead.
+    /// </summary>
+    void ShowTooltipsWhenDisabled(Control panel)
+    {
+        Control? shown = null;
+        panel.MouseMove += (_, e) =>
+        {
+            var child = panel.GetChildAtPoint(e.Location, GetChildAtPointSkip.Invisible);
+            var target = child is { Enabled: false } && _tips.GetToolTip(child).Length > 0 ? child : null;
+            if (target == shown)
+                return;
+            shown = target;
+            if (target == null)
+                _tips.Hide(panel);
+            else
+                _tips.Show(_tips.GetToolTip(target), panel, target.Left, target.Bottom + 4, _tips.AutoPopDelay);
+        };
+        panel.MouseLeave += (_, _) =>
+        {
+            if (shown != null)
+                _tips.Hide(panel);
+            shown = null;
+        };
+    }
+
     /// <summary>Icon buttons have no visible text, so the tooltip and screen readers say what they do.</summary>
-    void Describe(Button button, string tip)
+    void Describe(Control button, string tip)
     {
         _tips.SetToolTip(button, tip);
         button.AccessibleName = tip;
