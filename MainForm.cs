@@ -25,7 +25,9 @@ public sealed class MainForm : Form
         IconStop = "\uE71A", IconSnapshot = "\uE722", IconRecord = "\uE7C8", IconRotate = "\uE7AD",
         IconFullScreen = "\uE740", IconProbe = "\uE9D9", IconPictures = "\uE8B9", IconVideos = "\uE8B2",
         IconDenoise = "\uF4A5", IconSharpen = "\uE793", IconStabilize = "\uE7B7", IconInterpolate = "\uE916",
-        Icon3D = "\uF158", IconHalfWidth = "\uF57C", IconSwapEyes = "\uE8AB";
+        Icon3D = "\uF158", IconHalfWidth = "\uF57C", IconSwapEyes = "\uE8AB", IconShowAll = "\uE8FD",
+        IconAutoConnect = "\uE8EE", IconDeepScan = "\uE773", IconStretch = "\uE9A6", IconLight = "\uEA80",
+        IconTimestamp = "\uEC92";
     static readonly Font IconFont = new(
         FontFamily.Families.Any(f => f.Name == "Segoe Fluent Icons") ? "Segoe Fluent Icons" : "Segoe MDL2 Assets", 12f);
 
@@ -34,19 +36,19 @@ public sealed class MainForm : Form
 
     readonly ComboBox _adapterBox = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 170, DropDownWidth = 340 };
     readonly ComboBox _networkBox = new() { Width = 200, DropDownWidth = 340 };
-    readonly CheckBox _showAll = new() { Text = "Show all", AutoSize = true, Margin = new Padding(3, 6, 3, 3) };
+    readonly CheckBox _showAll = IconToggle(IconShowAll);
     readonly Button _scanButton = IconButton(IconScan);
     readonly TextBox _passwordBox = new() { Width = 140, UseSystemPasswordChar = true, PlaceholderText = "blank if open" };
     readonly Button _connectButton = IconButton(IconConnect);
     readonly Button _disconnectButton = IconButton(IconDisconnect);
-    readonly CheckBox _autoConnect = new() { Text = "Auto-connect", AutoSize = true, Margin = new Padding(8, 6, 3, 3) };
+    readonly CheckBox _autoConnect = IconToggle(IconAutoConnect);
     readonly ComboBox _cameraTypeBox = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 130 };
     readonly TextBox _streamUrlBox = new() { Width = 250, PlaceholderText = "rtsp://... or http://..." };
     readonly Button _startButton = IconButton(IconPlay);
     readonly Button _stopButton = IconButton(IconStop);
     readonly Button _snapshotButton = IconButton(IconSnapshot);
     readonly Button _probeButton = IconButton(IconProbe);
-    readonly CheckBox _fullScan = new() { Text = "Deep scan", AutoSize = true, Margin = new Padding(3, 6, 3, 3) };
+    readonly CheckBox _fullScan = IconToggle(IconDeepScan);
     readonly Button _folderButton = IconButton(IconPictures);
     readonly Button _recordButton = IconButton(IconRecord);
     readonly Button _recordingsButton = IconButton(IconVideos);
@@ -59,9 +61,9 @@ public sealed class MainForm : Form
     readonly TrackBar _sharpenSlider = Slider();
     readonly CheckBox _stabilizeBox = IconToggle(IconStabilize);
     readonly CheckBox _interpolateBox = IconToggle(IconInterpolate);
-    readonly CheckBox _stretchBox = Check("Stretch to fill");
-    readonly CheckBox _lightBox = Check("On");
-    readonly CheckBox _timestampBox = Check("Timestamp");
+    readonly CheckBox _stretchBox = IconToggle(IconStretch);
+    readonly CheckBox _lightBox = IconToggle(IconLight);
+    readonly CheckBox _timestampBox = IconToggle(IconTimestamp);
     readonly TrackBar _lightSlider = Slider();
     readonly Label _perfCamera = Metric("Camera: -");
     readonly Label _perfShown = Metric("Shown: -");
@@ -126,29 +128,40 @@ public sealed class MainForm : Form
 
         Directory.CreateDirectory(AppPaths.AppDir);
         BuildLayout();
-        foreach (var (button, tip) in new (Control, string)[]
+        foreach (var (control, name, description) in new (Control, string, string)[]
         {
-            (_scanButton, "Scan for Wi-Fi networks"), (_connectButton, "Connect to the camera's Wi-Fi"),
-            (_disconnectButton, "Disconnect from the camera's Wi-Fi"), (_startButton, "Start video"),
-            (_stopButton, "Stop video"), (_snapshotButton, "Snapshot"), (_folderButton, "Open the snapshots folder"),
-            (_recordingsButton, "Open the recordings folder"), (_fullScreenButton, "Full screen (F11)"),
-            (_denoiseBox, "Reduce grain"), (_sharpenBox, "Sharpen"), (_stabilizeBox, "Stabilize (steady a shaky picture)"),
-            (_interpolateBox, "Double frame rate: insert a motion-estimated frame between camera frames; 20 fps becomes 40, about 50 ms later"),
-            (_sbsBox, "Convert to 3D (side-by-side, for VR headsets and 3D TVs)"), (_halfSbsBox, "Half width: squeeze both eyes into one normal-width frame"),
-            (_swapEyesBox, "Swap eyes (cross-eyed viewing)"), (_denoiseSlider, "Grain reduction strength"),
-            (_sharpenSlider, "Sharpening amount"), (_depthSlider, "3D intensity"),
+            (_scanButton, "Scan", "look for Wi-Fi networks"),
+            (_showAll, "Show all", "list every Wi-Fi network, not just ones that look like cameras"),
+            (_connectButton, "Connect", "join the selected camera's Wi-Fi"),
+            (_disconnectButton, "Disconnect", "leave the camera's Wi-Fi and go back to the previous network"),
+            (_autoConnect, "Auto-connect", "join the camera's Wi-Fi and keep the video running, reconnecting if it drops"),
+            (_timestampBox, "Timestamp", "the date and time the camera draws on the picture (VStarcam cameras; the camera remembers it)"),
+            (_fullScan, "Deep scan", "make the probe check every TCP and UDP port (takes a few minutes)"),
+            (_lightBox, "Light", "the camera's built-in light (i4Season cameras; not every model can be switched remotely)"),
+            (_lightSlider, "Brightness", "how bright the camera's light is"),
+            (_startButton, "Start video", "start streaming from the camera"),
+            (_stopButton, "Stop video", "stop streaming (auto-connect waits until you start it again)"),
+            (_fullScreenButton, "Full screen", "show only the video (F11; Esc or double-click to return)"),
+            (_stretchBox, "Stretch to fill", "reshape the picture to fill the video area (also applies to snapshots and recordings)"),
+            (_snapshotButton, "Snapshot", "save the current picture as a JPEG"),
+            (_folderButton, "Snapshots folder", "open the folder snapshots are saved in"),
+            (_recordingsButton, "Recordings folder", "open the folder recordings are saved in"),
+            (_denoiseBox, "Reduce grain", "smooth out sensor noise"),
+            (_denoiseSlider, "Grain reduction strength", "how strongly grain is smoothed"),
+            (_sharpenBox, "Sharpen", "bring out fine detail"),
+            (_sharpenSlider, "Sharpening amount", "how strongly detail is sharpened"),
+            (_stabilizeBox, "Stabilize", "steady a shaky picture"),
+            (_interpolateBox, "Double frame rate", "insert a motion-estimated frame between camera frames; 20 fps becomes 40, about 50 ms later"),
+            (_sbsBox, "Convert to 3D", "side-by-side 3D from estimated depth, for VR headsets and 3D TVs"),
+            (_depthSlider, "3D intensity", "how strong the depth effect is"),
+            (_halfSbsBox, "Half width", "squeeze both eyes into one normal-width frame"),
+            (_swapEyesBox, "Swap eyes", "put the left eye's view on the right, for cross-eyed viewing"),
+            (_perfLatency, "Latency", "time from a camera frame arriving to the finished frame reaching the display"),
+            (_perfDropped, "Skipped", "camera frames skipped because processing was still busy with the previous one"),
         })
-            Describe(button, tip);
+            Describe(control, name, description);
         ShowRecordButton(recording: false);
         ShowProbeButton(probing: false);
-        _tips.SetToolTip(_fullScan, "Probe every TCP and UDP port (takes a few minutes)");
-        _tips.SetToolTip(_showAll, "List every Wi-Fi network, not just ones that look like cameras");
-        _tips.SetToolTip(_stretchBox, "Reshape the picture to fill the video area (also applies to snapshots and recordings)");
-        _tips.SetToolTip(_perfLatency, "Time from a camera frame arriving to the finished frame reaching the display");
-        _tips.SetToolTip(_perfDropped, "Camera frames skipped because processing was still busy with the previous one");
-        _tips.SetToolTip(_lightBox, "The camera's built-in light (i4Season cameras; not every model can be switched remotely)");
-        _tips.SetToolTip(_lightSlider, "Light brightness");
-        _tips.SetToolTip(_timestampBox, "The date and time the camera draws on the picture (VStarcam cameras; the camera remembers it)");
         KeyPreview = true;
         KeyDown += (_, e) =>
         {
@@ -275,11 +288,11 @@ public sealed class MainForm : Form
             Section("Connection", Label("Password"), _passwordBox, _connectButton, _disconnectButton, _autoConnect),
             Section("Camera", Label("Type"), _cameraTypeBox, Label("URL"), _streamUrlBox, _timestampBox),
             Section("Diagnostics", _probeButton, _fullScan),
-            Section("Light", _lightBox, Label("Brightness"), _lightSlider),
+            Section("Light", _lightBox, _lightSlider),
             Section("Video", _startButton, _stopButton, _rotateButton, _fullScreenButton, _stretchBox),
             Section("Capture", _snapshotButton, _recordButton, _folderButton, _recordingsButton),
             Section("Enhance", _denoiseBox, _denoiseSlider, _sharpenBox, _sharpenSlider, _stabilizeBox, _interpolateBox),
-            Section("3D (side-by-side)", _sbsBox, _depthSlider, _halfSbsBox, _swapEyesBox),
+            Section("3D", _sbsBox, _depthSlider, _halfSbsBox, _swapEyesBox),
             Section("Performance", _perfCamera, _perfShown, _perfLatency, _perfDepth, _perfDropped),
         ]);
         _rows.Add(toolbar);
@@ -289,10 +302,17 @@ public sealed class MainForm : Form
         // give them all the tallest one's height so the rows line up.
         Load += (_, _) =>
         {
+            // Glyphs differ in width, so size every icon button and toggle like the largest one.
+            var icons = toolbar.Controls.OfType<GroupBox>().SelectMany(b => b.Controls[0].Controls.Cast<Control>())
+                .Where(c => c.Font.Name == IconFont.Name).ToList();
+            var iconSize = new Size(icons.Max(c => c.PreferredSize.Width), icons.Max(c => c.PreferredSize.Height));
+            foreach (var icon in icons)
+                icon.MinimumSize = iconSize;
+
             var sections = toolbar.Controls.OfType<GroupBox>().ToList();
             int height = sections.Max(b => b.PreferredSize.Height);
             foreach (var box in sections)
-                box.MinimumSize = new Size(0, height);
+                box.MinimumSize = new Size(box.MinimumSize.Width, height);
         };
 
         _split.Panel1.Controls.Add(_picture);
@@ -322,6 +342,8 @@ public sealed class MainForm : Form
             Padding = new Padding(4, 2, 4, 2), Margin = new Padding(3, 2, 3, 2),
         };
         box.Controls.Add(line);
+        // A section with only a few icons would otherwise be narrower than its title and cut it off.
+        box.MinimumSize = new Size(TextRenderer.MeasureText(title, box.Font).Width + 16, 0);
         // Sit just below the title, wherever the box says that is at the current display scaling.
         box.Layout += (_, _) => line.Location = box.DisplayRectangle.Location;
         return box;
@@ -374,29 +396,38 @@ public sealed class MainForm : Form
         };
     }
 
-    /// <summary>Icon buttons have no visible text, so the tooltip and screen readers say what they do.</summary>
-    void Describe(Control button, string tip)
+    /// <summary>
+    /// Icon controls have no visible text, so the tooltip ("Name: description") and screen readers say what they do.
+    /// </summary>
+    void Describe(Control control, string name, string description)
     {
-        _tips.SetToolTip(button, tip);
-        button.AccessibleName = tip;
+        _tips.SetToolTip(control, $"{name}: {description}");
+        control.AccessibleName = name;
+        control.AccessibleDescription = description;
     }
 
     void ShowRecordButton(bool recording)
     {
         _recordButton.Text = recording ? IconStop : IconRecord;
         _recordButton.ForeColor = recording ? SystemColors.ControlText : Color.Red;
-        Describe(_recordButton, recording ? "Stop recording" : "Record");
+        if (recording)
+            Describe(_recordButton, "Stop recording", "finish the recording and save it");
+        else
+            Describe(_recordButton, "Record", "record the video as shown (rotated, enhanced or 3D) to an MP4 file");
     }
 
     void ShowProbeButton(bool probing)
     {
         _probeButton.Text = probing ? IconStop : IconProbe;
-        Describe(_probeButton, probing ? "Stop probe" : "Probe camera: list every port and service it offers");
+        if (probing)
+            Describe(_probeButton, "Stop probe", "cancel the probe");
+        else
+            Describe(_probeButton, "Probe camera", "list every port and service the camera offers, and save a report");
     }
 
-    void ShowRotation() => Describe(_rotateButton, _rotation == 0 ? "Rotate" : $"Rotate (now {_rotation}\u00b0)");
+    void ShowRotation() =>
+        Describe(_rotateButton, "Rotate", $"turn the picture 90\u00b0 clockwise (now {_rotation}\u00b0)");
 
-    static CheckBox Check(string text) => new() { Text = text, AutoSize = true, Margin = new Padding(6, 6, 0, 3) };
 
     // Grows to fit its text, but never narrower than a typical value, so the row doesn't jitter every second.
     static Label Metric(string text, int minimumWidth = 95) => new()
