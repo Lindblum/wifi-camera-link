@@ -30,6 +30,9 @@ public sealed record EnhanceOptions
 /// Turns camera JPEGs into display bitmaps on a worker thread: rotate, stabilize, reduce grain, sharpen,
 /// then optionally render side-by-side 3D. Only the newest frame is processed if the worker falls behind.
 /// </summary>
+/// <summary>A frame's size as the camera sent it, and after resampling.</summary>
+public sealed record FrameSizes(Size Native, Size Resampled);
+
 /// <summary>Pipeline measurements since the last call to <see cref="VideoPipeline.TakeStats"/>.</summary>
 public readonly record struct PipelineStats(int CameraFrames, int Dropped, int Output, double AverageLatencyMs, double MaxLatencyMs);
 
@@ -154,6 +157,9 @@ public sealed class VideoPipeline : IDisposable
     }
 
     /// <summary>Counts and latency (camera frame arriving to the finished frame being handed over for display).</summary>
+    /// <summary>The latest frame's size before and after resampling; null before the first frame.</summary>
+    public FrameSizes? Sizes { get; private set; }
+
     public PipelineStats TakeStats()
     {
         lock (_statsLock)
@@ -223,12 +229,15 @@ public sealed class VideoPipeline : IDisposable
                 return;
 
             // Scale down first, so every later step (and 3D especially) has fewer pixels to work on.
+            var native = current.Size();
             int shorter = Math.Min(current.Width, current.Height);
             if (o.MaxLines > 0 && shorter > o.MaxLines)
             {
                 double scale = (double)o.MaxLines / shorter;
                 Replace(ref current, current.Resize(new Size(0, 0), scale, scale, InterpolationFlags.Area));
             }
+            if (Sizes is not { } sizes || sizes.Native != native || sizes.Resampled != current.Size())
+                Sizes = new FrameSizes(native, current.Size());
 
             if (o.Rotation != 0)
                 Replace(ref current, Rotate(current, o.Rotation));

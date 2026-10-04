@@ -72,6 +72,7 @@ public sealed class MainForm : Form
     readonly Label _perfLatency = Metric("Latency: -", 175);
     readonly Label _perfDepth = Metric("Depth: -");
     readonly Label _perfDropped = Metric("Skipped: -");
+    readonly Label _perfSize = Metric("Resolution: -", 150);
     readonly CheckBox _sbsBox = IconToggle(Icon3D);
     readonly TrackBar _depthSlider = Slider(MaxIntensity);
     readonly CheckBox _halfSbsBox = IconToggle(IconHalfWidth);
@@ -148,7 +149,7 @@ public sealed class MainForm : Form
             (_snapshotButton, "Snapshot", "save the current picture as a JPEG"),
             (_folderButton, "Snapshots folder", "open the folder snapshots are saved in"),
             (_recordingsButton, "Recordings folder", "open the folder recordings are saved in"),
-            (_resolutionBox, "Processing resolution", "scale the camera's picture down before enhancement and 3D, so they keep up " +
+            (_resolutionBox, "Resampling", "scale the camera's picture down before enhancement and 3D, so they keep up " +
                 "(recordings use it too); the camera still sends its full resolution"),
             (_denoiseBox, "Reduce grain", "smooth out sensor noise"),
             (_denoiseSlider, "Grain reduction strength", "how strongly grain is smoothed"),
@@ -162,6 +163,7 @@ public sealed class MainForm : Form
             (_swapEyesBox, "Swap eyes", "put the left eye's view on the right, for cross-eyed viewing"),
             (_perfLatency, "Latency", "time from a camera frame arriving to the finished frame reaching the display"),
             (_perfDropped, "Skipped", "camera frames skipped because processing was still busy with the previous one"),
+            (_perfSize, "Resolution", "the picture as the camera sends it, and after resampling"),
         })
             Describe(control, name, description);
         ShowRecordButton(recording: false);
@@ -253,6 +255,11 @@ public sealed class MainForm : Form
                 ? $"Latency: {stats.AverageLatencyMs:0} ms (max {stats.MaxLatencyMs:0})" : "Latency: -";
             _perfDepth.Text = live && _sbsBox.Checked && _depthEstimator != null ? $"Depth: {depthRate}/s" : "Depth: -";
             _perfDropped.Text = live ? $"Skipped: {stats.Dropped}" : "Skipped: -";
+            _perfSize.Text = live && _pipeline.Sizes is { } sizes
+                ? sizes.Native == sizes.Resampled
+                    ? $"Resolution: {sizes.Native.Width}\u00d7{sizes.Native.Height}"
+                    : $"Resolution: {sizes.Native.Width}\u00d7{sizes.Native.Height} \u2192 {sizes.Resampled.Width}\u00d7{sizes.Resampled.Height}"
+                : "Resolution: -";
             _perfDropped.ForeColor = stats.Dropped > 0 ? Color.DarkOrange : SystemColors.ControlText;
         };
         _pipeline.FrameReady += ShowProcessedFrame;
@@ -295,11 +302,11 @@ public sealed class MainForm : Form
             Section("Camera", Label("Type"), _cameraTypeBox, Label("URL"), _streamUrlBox, _timestampBox),
             Section("Diagnostics", _probeButton, _fullScan),
             Section("Light", _lightBox, _lightSlider),
-            Section("Video", _startButton, _stopButton, _rotateButton, _fullScreenButton, _stretchBox),
+            Section("Video", _startButton, _stopButton, _rotateButton, _fullScreenButton, _stretchBox, _resolutionBox),
             Section("Capture", _snapshotButton, _recordButton, _folderButton, _recordingsButton),
-            Section("Enhance", _resolutionBox, _denoiseBox, _denoiseSlider, _sharpenBox, _sharpenSlider, _stabilizeBox, _interpolateBox),
+            Section("Enhance", _denoiseBox, _denoiseSlider, _sharpenBox, _sharpenSlider, _stabilizeBox, _interpolateBox),
             Section("3D", _sbsBox, _depthSlider, _halfSbsBox, _swapEyesBox),
-            Section("Performance", _perfCamera, _perfShown, _perfLatency, _perfDepth, _perfDropped),
+            Section("Performance", _perfCamera, _perfShown, _perfLatency, _perfDepth, _perfDropped, _perfSize),
         ]);
         _rows.Add(toolbar);
         foreach (var box in toolbar.Controls.OfType<GroupBox>())
@@ -314,6 +321,8 @@ public sealed class MainForm : Form
             var iconSize = new Size(icons.Max(c => c.PreferredSize.Width), icons.Max(c => c.PreferredSize.Height));
             foreach (var icon in icons)
                 icon.MinimumSize = iconSize;
+            MatchHeight(toolbar.Controls.OfType<GroupBox>().SelectMany(b => b.Controls[0].Controls.Cast<Control>())
+                .Where(c => c.Font.Name != IconFont.Name), iconSize.Height);
 
             var sections = toolbar.Controls.OfType<GroupBox>().ToList();
             int height = sections.Max(b => b.PreferredSize.Height);
@@ -366,6 +375,74 @@ public sealed class MainForm : Form
         Text = glyph, Font = IconFont, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
         Padding = new Padding(6, 3, 6, 1),
     };
+
+    /// <summary>
+    /// Gives labels, text boxes and dropdowns the icon buttons' height, so each toolbar row lines up:
+    /// labels centre their text, and dropdowns are owner-drawn because that's the only way to set their height.
+    /// Sliders can't change height, so they're centred instead.
+    /// </summary>
+    static void MatchHeight(IEnumerable<Control> controls, int height)
+    {
+        const int top = 3; // the buttons' default margin
+        foreach (var control in controls)
+        {
+            switch (control)
+            {
+                case Label label:
+                    label.MinimumSize = new Size(label.MinimumSize.Width, height);
+                    label.TextAlign = ContentAlignment.MiddleLeft;
+                    label.Margin = new Padding(label.Margin.Left, top, label.Margin.Right, top);
+                    break;
+                case TextBox box:
+                    box.AutoSize = false;
+                    box.Height = height;
+                    box.Margin = new Padding(box.Margin.Left, top, box.Margin.Right, top);
+                    break;
+                case ComboBox combo:
+                    // Widths are set in pixels and don't grow with display scaling, so let a box widen to fit
+                    // its longest choice (up to half again its width; long adapter names still get "...").
+                    FitWidth(combo);
+                    combo.DrawMode = DrawMode.OwnerDrawVariable;
+                    combo.MeasureItem += (_, e) => e.ItemHeight = combo.Font.Height + 4; // list rows stay normal
+                    combo.DrawItem += DrawComboItem;
+                    combo.ItemHeight = height - 6; // the selection field; the border adds the rest
+                    combo.Margin = new Padding(combo.Margin.Left, top, combo.Margin.Right, top);
+                    break;
+                default:
+                    int spare = Math.Max(0, height - control.Height);
+                    control.Margin = new Padding(control.Margin.Left, top + spare / 2, control.Margin.Right, top + spare - spare / 2);
+                    break;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Widths are set in pixels and don't grow with display scaling, so a dropdown widens to fit its longest
+    /// choice, up to half again its designed width (long adapter names still end in "...").
+    /// </summary>
+    static void FitWidth(ComboBox combo)
+    {
+        if (combo.DropDownStyle != ComboBoxStyle.DropDownList || combo.Items.Count == 0)
+            return;
+        int designed = combo.Tag as int? ?? combo.Width;
+        combo.Tag = designed;
+        int longest = combo.Items.Cast<object>().Max(i => TextRenderer.MeasureText(combo.GetItemText(i), combo.Font).Width);
+        int needed = longest + SystemInformation.VerticalScrollBarWidth * combo.DeviceDpi / 96 + 12;
+        combo.Width = Math.Clamp(needed, designed, designed * 3 / 2);
+    }
+
+    static void DrawComboItem(object? sender, DrawItemEventArgs e)
+    {
+        var combo = (ComboBox)sender!;
+        e.DrawBackground();
+        if (e.Index >= 0)
+        {
+            var bounds = new Rectangle(e.Bounds.X + 2, e.Bounds.Y, e.Bounds.Width - 2, e.Bounds.Height);
+            TextRenderer.DrawText(e.Graphics, combo.GetItemText(combo.Items[e.Index]), combo.Font, bounds, e.ForeColor,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
+        }
+        e.DrawFocusRectangle();
+    }
 
     /// <summary>A checkbox drawn as an icon button that stays pressed while it's on.</summary>
     static CheckBox IconToggle(string glyph) => new()
@@ -456,6 +533,7 @@ public sealed class MainForm : Form
         {
             var adapters = _wlan.GetInterfaces();
             _adapterBox.Items.AddRange(adapters.ToArray<object>());
+            FitWidth(_adapterBox); // its choices arrive after the toolbar was sized
             if (adapters.Count == 0)
             {
                 Log("No Wi-Fi adapter found.");
