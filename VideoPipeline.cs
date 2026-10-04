@@ -21,6 +21,7 @@ public sealed record EnhanceOptions
     public bool HalfSbs { get; init; }
     public bool SwapEyes { get; init; }
     public bool Stretch { get; init; }              // reshape to the display's aspect ratio, filling it
+    public int MaxLines { get; init; }              // scale frames down so the shorter side is at most this; 0 = as sent
 
     public bool IsPassthrough => Rotation == 0 && !Denoise && !Sharpen && !Stabilize && !Sbs3D;
 }
@@ -220,6 +221,14 @@ public sealed class VideoPipeline : IDisposable
         {
             if (current.Empty())
                 return;
+
+            // Scale down first, so every later step (and 3D especially) has fewer pixels to work on.
+            int shorter = Math.Min(current.Width, current.Height);
+            if (o.MaxLines > 0 && shorter > o.MaxLines)
+            {
+                double scale = (double)o.MaxLines / shorter;
+                Replace(ref current, current.Resize(new Size(0, 0), scale, scale, InterpolationFlags.Area));
+            }
 
             if (o.Rotation != 0)
                 Replace(ref current, Rotate(current, o.Rotation));

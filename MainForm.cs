@@ -55,6 +55,8 @@ public sealed class MainForm : Form
     readonly ToolStripStatusLabel _recordLabel = new() { ForeColor = Color.Red };
     readonly Button _rotateButton = IconButton(IconRotate);
     readonly Button _fullScreenButton = IconButton(IconFullScreen);
+    readonly ComboBox _resolutionBox = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 80, Margin = new Padding(3, 5, 6, 3) };
+    static readonly (string Name, int Lines)[] Resolutions = [("Full", 0), ("1080p", 1080), ("720p", 720), ("480p", 480)];
     readonly CheckBox _denoiseBox = IconToggle(IconDenoise);
     readonly TrackBar _denoiseSlider = Slider();
     readonly CheckBox _sharpenBox = IconToggle(IconSharpen);
@@ -146,6 +148,8 @@ public sealed class MainForm : Form
             (_snapshotButton, "Snapshot", "save the current picture as a JPEG"),
             (_folderButton, "Snapshots folder", "open the folder snapshots are saved in"),
             (_recordingsButton, "Recordings folder", "open the folder recordings are saved in"),
+            (_resolutionBox, "Processing resolution", "scale the camera's picture down before enhancement and 3D, so they keep up " +
+                "(recordings use it too); the camera still sends its full resolution"),
             (_denoiseBox, "Reduce grain", "smooth out sensor noise"),
             (_denoiseSlider, "Grain reduction strength", "how strongly grain is smoothed"),
             (_sharpenBox, "Sharpen", "bring out fine detail"),
@@ -253,7 +257,9 @@ public sealed class MainForm : Form
         };
         _pipeline.FrameReady += ShowProcessedFrame;
         _pipeline.Log += Log;
+        _resolutionBox.Items.AddRange([.. Resolutions.Select(r => r.Name)]);
         LoadEnhanceSettings();
+        _resolutionBox.SelectedIndexChanged += (_, _) => ApplyEnhanceOptions();
         foreach (var box in new[] { _denoiseBox, _sharpenBox, _stabilizeBox, _interpolateBox, _stretchBox, _halfSbsBox, _swapEyesBox })
             box.CheckedChanged += (_, _) => ApplyEnhanceOptions();
         foreach (var slider in new[] { _denoiseSlider, _sharpenSlider, _depthSlider })
@@ -291,7 +297,7 @@ public sealed class MainForm : Form
             Section("Light", _lightBox, _lightSlider),
             Section("Video", _startButton, _stopButton, _rotateButton, _fullScreenButton, _stretchBox),
             Section("Capture", _snapshotButton, _recordButton, _folderButton, _recordingsButton),
-            Section("Enhance", _denoiseBox, _denoiseSlider, _sharpenBox, _sharpenSlider, _stabilizeBox, _interpolateBox),
+            Section("Enhance", _resolutionBox, _denoiseBox, _denoiseSlider, _sharpenBox, _sharpenSlider, _stabilizeBox, _interpolateBox),
             Section("3D", _sbsBox, _depthSlider, _halfSbsBox, _swapEyesBox),
             Section("Performance", _perfCamera, _perfShown, _perfLatency, _perfDepth, _perfDropped),
         ]);
@@ -1200,6 +1206,7 @@ public sealed class MainForm : Form
             Stabilize = _stabilizeBox.Checked,
             Interpolate = _interpolateBox.Checked,
             Stretch = _stretchBox.Checked,
+            MaxLines = Resolutions[Math.Max(0, _resolutionBox.SelectedIndex)].Lines,
             Sbs3D = _sbsBox.Checked,
             Depth3D = _depthSlider.Value,
             HalfSbs = _halfSbsBox.Checked,
@@ -1225,6 +1232,7 @@ public sealed class MainForm : Form
         _stabilizeBox.Checked = o.Stabilize;
         _interpolateBox.Checked = o.Interpolate;
         _stretchBox.Checked = o.Stretch;
+        _resolutionBox.SelectedIndex = Math.Max(0, Array.FindIndex(Resolutions, r => r.Lines == o.MaxLines));
         _sbsBox.Checked = o.Sbs3D;
         _depthSlider.Value = Math.Clamp(o.Depth3D, 1, MaxIntensity);
         _halfSbsBox.Checked = o.HalfSbs;
