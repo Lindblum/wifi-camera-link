@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
@@ -31,8 +32,12 @@ public sealed class CameraProbe
     [
         "/", "/live", "/live/ch00_0", "/live/ch00_1", "/live/main", "/11", "/12", "/h264", "/h264_stream",
         "/onvif1", "/stream1", "/stream0", "/av0_0", "/ch0", "/ch0_0.h264", "/main", "/video1", "/live.sdp",
-        "/cam/realmonitor?channel=1&subtype=0", "/0", "/1",
+        "/cam/realmonitor?channel=1&subtype=0", "/0", "/1", "/tcp/av0_0", "/udp/av0_0",
     ];
+
+    // Some RTSP servers ignore OPTIONS on "/" but answer DESCRIBE on a real stream path (VStarcam uses these).
+    static readonly int[] RtspPorts = [554, 8554, 10554];
+    static readonly string[] QuietRtspPaths = ["/tcp/av0_0", "/udp/av0_0", "/live/ch00_0", "/onvif1"];
 
     // Windows' SIO_UDP_CONNRESET: stops "port unreachable" replies from breaking a UDP socket's receive loop.
     const int SioUdpConnReset = -1744830452;
@@ -41,6 +46,7 @@ public sealed class CameraProbe
     readonly List<string> _streamUrls = [];
     IPAddress _localAddress = IPAddress.Any;
     int _refused, _timedOut;
+    string? _supportedCamera; // a camera with its own protocol that the app streams from, if one was recognised
 
     public CameraProbe(Action<string> log) => _log = log;
 
@@ -92,7 +98,9 @@ public sealed class CameraProbe
 
         _log(_streamUrls.Count > 0
             ? $"Probe finished. Stream candidates:{Environment.NewLine}  {string.Join(Environment.NewLine + "  ", _streamUrls)}"
-            : "Probe finished. No standard video stream found. Save this report so the protocol can be worked out.");
+            : _supportedCamera != null
+                ? $"Probe finished. No standard video stream, but this is a {_supportedCamera} camera, which the app supports."
+                : "Probe finished. No standard video stream found. Save this report so the protocol can be worked out.");
     }
 
     /// <summary>
@@ -261,13 +269,45 @@ public sealed class CameraProbe
         if (StartsWith(rtsp, "RTSP/"))
         {
             _log($"{tag} RTSP server:{Environment.NewLine}{Indent(Describe(rtsp))}");
-            await ProbeRtspPathsAsync(host, port, ct);
+            await ProbeRtspPathsAsync(host, port, RtspPaths, ct);
             return;
         }
         if (rtsp.Length > 0)
+        {
             _log($"{tag} Non-RTSP reply to OPTIONS: {Describe(rtsp)}");
-        else if (banner.Length == 0 && http.Length == 0)
-            _log($"{tag} Open but silent: probably a proprietary protocol.");
+            return;
+        }
+        if (banner.Length > 0 || http.Length > 0)
+            return;
+
+        if (await InspectVStarcamAsync(host, port, ct))
+            return;
+        if (RtspPorts.Contains(port) && await ProbeRtspPathsAsync(host, port, QuietRtspPaths, ct))
+            return;
+        _log($"{tag} Accepts connections but didn't answer GET / or RTSP OPTIONS: it may need a specific request, " +
+             "or speak a proprietary protocol.");
+    }
+
+    /// <summary>
+    /// VStarcam's CGI server (port 81) drops requests it doesn't recognise, so it looks silent to GET /.
+    /// It does answer get_status.cgi with the factory password.
+    /// </summary>
+    async Task<bool> InspectVStarcamAsync(IPAddress host, int port, CancellationToken ct)
+    {
+        const string auth = "loginuse=admin&loginpas=888888&user=admin&pwd=888888";
+        var reply = await ExchangeAsync(host, port, HttpRequest(host, port, $"/get_status.cgi?{auth}"), 3000, 8192, ct);
+        string text = Encoding.ASCII.GetString(reply);
+        if (!text.StartsWith("HTTP/") || !text.Contains("var "))
+            return false;
+        _supportedCamera = "VStarcam";
+        string Field(string name) =>
+            Regex.Match(text, $@"\bvar {name}=""?([^"";\r\n]*)""?;") is { Success: true } m ? m.Groups[1].Value : "?";
+        _log(text.Contains("Auth Failed")
+            ? $"[{host}:{port}] VStarcam camera (O-KAM / Eye4 apps), but it rejected the factory password 888888. " +
+              "Put its password in \"VStarcamPassword\" in settings.json."
+            : $"[{host}:{port}] VStarcam camera (O-KAM / Eye4 apps): device {Field("deviceid")}, firmware {Field("sys_ver")}, " +
+              $"sensor {Field("sensor_width")}x{Field("sensor_hight")}. The app streams these directly (camera type Auto-detect or VStarcam).");
+        return true;
     }
 
     async Task ProbeHttpPathsAsync(IPAddress host, int port, CancellationToken ct)
@@ -293,15 +333,18 @@ public sealed class CameraProbe
         }
     }
 
-    async Task ProbeRtspPathsAsync(IPAddress host, int port, CancellationToken ct)
+    /// <summary>Tries DESCRIBE on each path; returns true if any path answered as RTSP.</summary>
+    async Task<bool> ProbeRtspPathsAsync(IPAddress host, int port, IEnumerable<string> paths, CancellationToken ct)
     {
         int cseq = 2;
-        foreach (string path in RtspPaths)
+        bool answered = false;
+        foreach (string path in paths)
         {
             string url = $"rtsp://{host}:{port}{path}";
             var response = await ExchangeAsync(host, port, RtspRequest("DESCRIBE", url, cseq++), 1500, 4096, ct);
             if (!StartsWith(response, "RTSP/"))
                 continue;
+            answered = true;
 
             string text = Encoding.ASCII.GetString(response);
             string status = text.Split("\r\n", 2)[0];
@@ -317,6 +360,7 @@ public sealed class CameraProbe
                 AddUrl(url);
             }
         }
+        return answered;
     }
 
     async Task UdpDiscoveryAsync(Ipv4Info local, List<IPAddress> hosts, CancellationToken ct)
@@ -359,13 +403,16 @@ public sealed class CameraProbe
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(3000);
         int replies = 0;
+        var seen = new HashSet<string>(); // the same reply often comes once per discovery packet
         try
         {
             while (true)
             {
                 var result = await udp.ReceiveAsync(cts.Token);
+                if (!seen.Add($"{result.RemoteEndPoint.Address} {Convert.ToHexString(result.Buffer)}"))
+                    continue;
                 replies++;
-                _log($"UDP reply from {result.RemoteEndPoint}: {Describe(result.Buffer)}");
+                _log($"UDP reply from {result.RemoteEndPoint}: {DescribePppp(result.Buffer) ?? Describe(result.Buffer)}");
             }
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested) { }
@@ -501,6 +548,21 @@ public sealed class CameraProbe
         }
         int shown = Math.Min(data.Length, 96);
         return $"{data.Length} bytes binary: {BitConverter.ToString(data, 0, shown).Replace('-', ' ')}{(data.Length > shown ? " ..." : "")}";
+    }
+
+    /// <summary>
+    /// Names a PPPP (CS2 P2P) punch / ready packet: F1 41|42, length 20, then the device ID as
+    /// prefix (8 bytes), serial (big-endian u32) and check code (8 bytes). Null for anything else.
+    /// </summary>
+    static string? DescribePppp(byte[] data)
+    {
+        if (data.Length < 24 || data[0] != 0xF1 || data[1] is not (0x41 or 0x42))
+            return null;
+        string prefix = Encoding.ASCII.GetString(data, 4, 8).TrimEnd('\0');
+        uint serial = BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(12));
+        string check = Encoding.ASCII.GetString(data, 16, 8).TrimEnd('\0');
+        string maker = prefix.StartsWith("VSTC") || prefix.StartsWith("VSTB") ? " VStarcam (O-KAM / Eye4 apps)." : "";
+        return $"PPPP (CS2 P2P) camera, device ID {prefix}-{serial:D6}-{check}.{maker}";
     }
 
     static string Indent(string text) =>

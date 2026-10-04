@@ -16,6 +16,10 @@ public sealed class Settings
     public List<string> KnownCameras { get; set; } = [];
     /// <summary>Stream address found by auto-detection, per camera network, so it's tried first next time.</summary>
     public Dictionary<string, string> StreamUrls { get; set; } = [];
+    /// <summary>The kind of camera found by auto-detection, per camera network, so it's tried first next time.</summary>
+    public Dictionary<string, CameraType> CameraTypes { get; set; } = [];
+    /// <summary>VStarcam cameras need their admin password; 888888 is the factory one.</summary>
+    public string VStarcamPassword { get; set; } = "888888";
 
     public static Settings Load()
     {

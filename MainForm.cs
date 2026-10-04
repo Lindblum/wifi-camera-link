@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.RegularExpressions;
 using System.Drawing.Imaging;
 using System.Net;
+using System.Net.Sockets;
 using System.Text;
 
 namespace WiFiCameraLink;
@@ -19,29 +20,37 @@ public sealed class MainForm : Form
         Environment.GetFolderPath(Environment.SpecialFolder.MyVideos), AppPaths.Name);
     const int MaxIntensity = 15;
 
+    // Line icons from Segoe Fluent Icons (Windows 11), falling back to Segoe MDL2 Assets (Windows 10).
+    const string IconScan = "\uE72C", IconConnect = "\uE701", IconDisconnect = "\uEB5E", IconPlay = "\uE768",
+        IconStop = "\uE71A", IconSnapshot = "\uE722", IconRecord = "\uE7C8", IconRotate = "\uE7AD",
+        IconFullScreen = "\uE740", IconProbe = "\uE9D9", IconPictures = "\uE8B9", IconVideos = "\uE8B2";
+    static readonly Font IconFont = new(
+        FontFamily.Families.Any(f => f.Name == "Segoe Fluent Icons") ? "Segoe Fluent Icons" : "Segoe MDL2 Assets", 12f);
+
     readonly WlanClient _wlan = new();
+    readonly ToolTip _tips = new();
 
     readonly ComboBox _adapterBox = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 170, DropDownWidth = 340 };
     readonly ComboBox _networkBox = new() { Width = 200, DropDownWidth = 340 };
     readonly CheckBox _showAll = new() { Text = "Show all", AutoSize = true, Margin = new Padding(3, 6, 3, 3) };
-    readonly Button _scanButton = new() { Text = "Scan", AutoSize = true };
+    readonly Button _scanButton = IconButton(IconScan);
     readonly TextBox _passwordBox = new() { Width = 140, UseSystemPasswordChar = true, PlaceholderText = "blank if open" };
-    readonly Button _connectButton = new() { Text = "Connect", AutoSize = true };
-    readonly Button _disconnectButton = new() { Text = "Disconnect", AutoSize = true };
+    readonly Button _connectButton = IconButton(IconConnect);
+    readonly Button _disconnectButton = IconButton(IconDisconnect);
     readonly CheckBox _autoConnect = new() { Text = "Auto-connect", AutoSize = true, Margin = new Padding(8, 6, 3, 3) };
     readonly ComboBox _cameraTypeBox = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 130 };
     readonly TextBox _streamUrlBox = new() { Width = 250, PlaceholderText = "rtsp://... or http://..." };
-    readonly Button _startButton = new() { Text = "Start video", AutoSize = true };
-    readonly Button _stopButton = new() { Text = "Stop video", AutoSize = true };
-    readonly Button _snapshotButton = new() { Text = "Snapshot", AutoSize = true };
-    readonly Button _probeButton = new() { Text = "Probe camera", AutoSize = true };
+    readonly Button _startButton = IconButton(IconPlay);
+    readonly Button _stopButton = IconButton(IconStop);
+    readonly Button _snapshotButton = IconButton(IconSnapshot);
+    readonly Button _probeButton = IconButton(IconProbe);
     readonly CheckBox _fullScan = new() { Text = "Deep scan", AutoSize = true, Margin = new Padding(3, 6, 3, 3) };
-    readonly Button _folderButton = new() { Text = "Snapshots", AutoSize = true };
-    readonly Button _recordButton = new() { Text = "● Record", AutoSize = true };
-    readonly Button _recordingsButton = new() { Text = "Recordings", AutoSize = true };
+    readonly Button _folderButton = IconButton(IconPictures);
+    readonly Button _recordButton = IconButton(IconRecord);
+    readonly Button _recordingsButton = IconButton(IconVideos);
     readonly ToolStripStatusLabel _recordLabel = new() { ForeColor = Color.Red };
-    readonly Button _rotateButton = new() { Text = "Rotate", AutoSize = true };
-    readonly Button _fullScreenButton = new() { Text = "Full screen (F11)", AutoSize = true };
+    readonly Button _rotateButton = IconButton(IconRotate);
+    readonly Button _fullScreenButton = IconButton(IconFullScreen);
     readonly CheckBox _denoiseBox = Check("Reduce grain");
     readonly TrackBar _denoiseSlider = Slider();
     readonly CheckBox _sharpenBox = Check("Sharpen");
@@ -49,6 +58,8 @@ public sealed class MainForm : Form
     readonly CheckBox _stabilizeBox = Check("Stabilize");
     readonly CheckBox _interpolateBox = Check("Double frame rate");
     readonly CheckBox _stretchBox = Check("Stretch to fill");
+    readonly CheckBox _lightBox = Check("On");
+    readonly TrackBar _lightSlider = Slider();
     readonly Label _perfCamera = Metric("Camera: -");
     readonly Label _perfShown = Metric("Shown: -");
     readonly Label _perfLatency = Metric("Latency: -", 175);
@@ -91,7 +102,14 @@ public sealed class MainForm : Form
     bool _depthLoading;
     bool _autoBusy;
     bool _autoPaused;       // set by Disconnect / Stop video, cleared by Connect / Start video
-    bool _autoWaitLogged;   // so "waiting for the camera" is logged once, not every tick
+    string? _autoWaitMessage; // last "waiting" message, so it's logged once, not every tick
+    int _autoFailures;      // auto-connect video attempts in a row that got no video
+    long _autoRetryTick;    // when auto-connect may try the video again (backs off after failures)
+    long _framesReceived;   // camera frames since the app started
+    I4SeasonCamera? _lightCamera; // the streaming camera whose light the Light controls switch, if any
+    bool _lightBusy;        // a light command is waiting for the camera's answer
+    bool _lightDirty;       // the controls changed meanwhile; send again once it answers
+    bool _lightUpdating;    // showing the camera's reported state, not a user change
 
     static readonly TimeSpan StallTimeout = TimeSpan.FromSeconds(10);
 
@@ -103,13 +121,24 @@ public sealed class MainForm : Form
 
         Directory.CreateDirectory(AppPaths.AppDir);
         BuildLayout();
-        var tips = new ToolTip();
-        tips.SetToolTip(_fullScan, "Probe every TCP and UDP port (takes a few minutes)");
-        tips.SetToolTip(_showAll, "List every Wi-Fi network, not just ones that look like cameras");
-        tips.SetToolTip(_stretchBox, "Reshape the picture to fill the video area (also applies to snapshots and recordings)");
-        tips.SetToolTip(_interpolateBox, "Insert a motion-estimated frame between camera frames: 20 fps becomes 40, about 50 ms later");
-        tips.SetToolTip(_perfLatency, "Time from a camera frame arriving to the finished frame reaching the display");
-        tips.SetToolTip(_perfDropped, "Camera frames skipped because processing was still busy with the previous one");
+        foreach (var (button, tip) in new (Button, string)[]
+        {
+            (_scanButton, "Scan for Wi-Fi networks"), (_connectButton, "Connect to the camera's Wi-Fi"),
+            (_disconnectButton, "Disconnect from the camera's Wi-Fi"), (_startButton, "Start video"),
+            (_stopButton, "Stop video"), (_snapshotButton, "Snapshot"), (_folderButton, "Open the snapshots folder"),
+            (_recordingsButton, "Open the recordings folder"), (_fullScreenButton, "Full screen (F11)"),
+        })
+            Describe(button, tip);
+        ShowRecordButton(recording: false);
+        ShowProbeButton(probing: false);
+        _tips.SetToolTip(_fullScan, "Probe every TCP and UDP port (takes a few minutes)");
+        _tips.SetToolTip(_showAll, "List every Wi-Fi network, not just ones that look like cameras");
+        _tips.SetToolTip(_stretchBox, "Reshape the picture to fill the video area (also applies to snapshots and recordings)");
+        _tips.SetToolTip(_interpolateBox, "Insert a motion-estimated frame between camera frames: 20 fps becomes 40, about 50 ms later");
+        _tips.SetToolTip(_perfLatency, "Time from a camera frame arriving to the finished frame reaching the display");
+        _tips.SetToolTip(_perfDropped, "Camera frames skipped because processing was still busy with the previous one");
+        _tips.SetToolTip(_lightBox, "The camera's built-in light (i4Season cameras; not every model can be switched remotely)");
+        _tips.SetToolTip(_lightSlider, "Light brightness");
         KeyPreview = true;
         KeyDown += (_, e) =>
         {
@@ -148,7 +177,7 @@ public sealed class MainForm : Form
             StopVideo();
         };
         _autoConnect.Checked = _settings.AutoConnect;
-        _cameraTypeBox.Items.AddRange(["Auto-detect", "i4Season (YPC)", "Stream URL"]);
+        _cameraTypeBox.Items.AddRange(["Auto-detect", "i4Season (YPC)", "Stream URL", "VStarcam (O-KAM)"]);
         _cameraTypeBox.SelectedIndex = (int)_settings.CameraType;
         _streamUrlBox.Text = _settings.StreamUrl ?? "";
         _streamUrlBox.Enabled = _settings.CameraType == CameraType.StreamUrl;
@@ -185,8 +214,8 @@ public sealed class MainForm : Form
         {
             int fps = Interlocked.Exchange(ref _framesThisSecond, 0);
             _recordLabel.Text = _pipeline.IsRecording ? $"● REC {_pipeline.RecordingElapsed:mm\\:ss}" : "";
-            if (!_pipeline.IsRecording && _recordButton.Text != "● Record")
-                _recordButton.Text = "● Record"; // recording ended on its own (e.g. an encoder error)
+            if (!_pipeline.IsRecording && _recordButton.Text != IconRecord)
+                ShowRecordButton(recording: false); // recording ended on its own (e.g. an encoder error)
             int shown = Interlocked.Exchange(ref _shownThisSecond, 0);
             int depthRate = _depthEstimator?.TakeCompletedCount() ?? 0;
             var stats = _pipeline.TakeStats();
@@ -206,6 +235,10 @@ public sealed class MainForm : Form
             box.CheckedChanged += (_, _) => ApplyEnhanceOptions();
         foreach (var slider in new[] { _denoiseSlider, _sharpenSlider, _depthSlider })
             slider.ValueChanged += (_, _) => ApplyEnhanceOptions();
+        _lightSlider.Value = _lightSlider.Maximum;
+        _lightBox.CheckedChanged += async (_, _) => await ApplyLightAsync();
+        _lightSlider.ValueChanged += async (_, _) => await ApplyLightAsync();
+        UpdateLightControls();
         _sbsBox.CheckedChanged += async (_, _) =>
         {
             ApplyEnhanceOptions();
@@ -230,8 +263,9 @@ public sealed class MainForm : Form
             Section("Connection", Label("Password"), _passwordBox, _connectButton, _disconnectButton, _autoConnect),
             Section("Camera", Label("Type"), _cameraTypeBox, Label("URL"), _streamUrlBox),
             Section("Diagnostics", _probeButton, _fullScan),
+            Section("Light", _lightBox, Label("Brightness"), _lightSlider),
             Section("Video", _startButton, _stopButton, _rotateButton, _fullScreenButton, _stretchBox),
-            Section("Capture", _snapshotButton, _recordButton, Label("Open:"), _folderButton, _recordingsButton),
+            Section("Capture", _snapshotButton, _recordButton, _folderButton, _recordingsButton),
             Section("Enhance", _denoiseBox, _denoiseSlider, _sharpenBox, _sharpenSlider, _stabilizeBox, _interpolateBox),
             Section("3D (side-by-side)", _sbsBox, Label("Intensity"), _depthSlider, _halfSbsBox, _swapEyesBox),
             Section("Performance", _perfCamera, _perfShown, _perfLatency, _perfDepth, _perfDropped),
@@ -285,6 +319,34 @@ public sealed class MainForm : Form
         Process.Start(new ProcessStartInfo(folder) { UseShellExecute = true });
     }
 
+    static Button IconButton(string glyph) => new()
+    {
+        Text = glyph, Font = IconFont, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+        Padding = new Padding(6, 3, 6, 1),
+    };
+
+    /// <summary>Icon buttons have no visible text, so the tooltip and screen readers say what they do.</summary>
+    void Describe(Button button, string tip)
+    {
+        _tips.SetToolTip(button, tip);
+        button.AccessibleName = tip;
+    }
+
+    void ShowRecordButton(bool recording)
+    {
+        _recordButton.Text = recording ? IconStop : IconRecord;
+        _recordButton.ForeColor = recording ? SystemColors.ControlText : Color.Red;
+        Describe(_recordButton, recording ? "Stop recording" : "Record");
+    }
+
+    void ShowProbeButton(bool probing)
+    {
+        _probeButton.Text = probing ? IconStop : IconProbe;
+        Describe(_probeButton, probing ? "Stop probe" : "Probe camera: list every port and service it offers");
+    }
+
+    void ShowRotation() => Describe(_rotateButton, _rotation == 0 ? "Rotate" : $"Rotate (now {_rotation}\u00b0)");
+
     static CheckBox Check(string text) => new() { Text = text, AutoSize = true, Margin = new Padding(6, 6, 0, 3) };
 
     // Grows to fit its text, but never narrower than a typical value, so the row doesn't jitter every second.
@@ -303,7 +365,7 @@ public sealed class MainForm : Form
 
     async Task InitializeAsync()
     {
-        Log("WiFi Camera Link started. Keep Ethernet plugged in so this PC stays online while the Wi-Fi adapter joins the camera.");
+        Log($"WiFi Camera Link started {DateTime.Now:yyyy-MM-dd}. Keep Ethernet plugged in so this PC stays online while the Wi-Fi adapter joins the camera.");
         try
         {
             var adapters = _wlan.GetInterfaces();
@@ -548,7 +610,7 @@ public sealed class MainForm : Form
         ProbeLog($"Probing via {adapter.Description}, connected to {network}");
 
         _probeCts = new CancellationTokenSource();
-        _probeButton.Text = "Stop probe";
+        ShowProbeButton(probing: true);
         SetStatus("Probing camera...");
         var probe = new CameraProbe(ProbeLog);
         try
@@ -567,7 +629,7 @@ public sealed class MainForm : Form
         {
             _probeCts.Dispose();
             _probeCts = null;
-            _probeButton.Text = "Probe camera";
+            ShowProbeButton(probing: false);
         }
 
         try
@@ -614,28 +676,47 @@ public sealed class MainForm : Form
         bool handshake = false;
         try
         {
+            ICameraSource I4Season() => new I4SeasonCamera(info.Address, cameraAddress);
+            ICameraSource VStarcam() => new VStarcamCamera(info.Address, cameraAddress, _settings.VStarcamPassword);
+
             if (type == CameraType.StreamUrl)
             {
                 handshake = await RunSourceAsync(new StreamCameraSource(manualUrl), info, ssid, ct);
             }
+            else if (type == CameraType.I4Season)
+            {
+                handshake = await RunSourceAsync(I4Season(), info, ssid, ct);
+            }
+            else if (type == CameraType.VStarcam)
+            {
+                handshake = await RunSourceAsync(VStarcam(), info, ssid, ct);
+            }
             else
             {
-                handshake = await RunSourceAsync(new I4SeasonCamera(info.Address, cameraAddress), info, ssid, ct);
-                if (!handshake && type == CameraType.Auto)
+                // Each kind of camera in turn, starting with the one that worked on this network before.
+                string? knownUrl = ssid != null && _settings.StreamUrls.TryGetValue(ssid, out var url) ? url : null;
+                var kinds = new List<(CameraType Type, Func<ICameraSource?> Create)>
                 {
-                    // Not an i4Season camera: try a stream address found here before, then look for one.
-                    if (ssid != null && _settings.StreamUrls.TryGetValue(ssid, out var known))
-                        handshake = await RunSourceAsync(new StreamCameraSource(known), info, ssid, ct);
-                    if (!handshake)
+                    (CameraType.I4Season, I4Season),
+                    (CameraType.VStarcam, VStarcam),
+                    (CameraType.StreamUrl, () => knownUrl == null ? null : new StreamCameraSource(knownUrl)),
+                };
+                if (ssid != null && _settings.CameraTypes.TryGetValue(ssid, out var remembered))
+                    kinds = [.. kinds.OrderBy(k => k.Type != remembered)];
+                foreach (var kind in kinds)
+                {
+                    if (kind.Create() is { } source && (handshake = await RunSourceAsync(source, info, ssid, ct)))
+                        break;
+                }
+                if (!handshake)
+                {
+                    Log("Looking for a standard video stream (RTSP or HTTP)...");
+                    var urls = await new CameraProbe(Log).FindStreamsAsync(info, cameraAddress, ct);
+                    foreach (string found in urls)
                     {
-                        Log("Looking for a standard video stream (RTSP or HTTP)...");
-                        var urls = await new CameraProbe(Log).FindStreamsAsync(info, cameraAddress, ct);
-                        foreach (string url in urls)
-                        {
-                            handshake = await RunSourceAsync(new StreamCameraSource(url), info, ssid, ct);
-                            if (handshake)
-                                break;
-                        }
+                        handshake = await RunSourceAsync(new StreamCameraSource(found), info, ssid, ct);
+                        if (handshake)
+                            break;
                     }
                 }
             }
@@ -694,7 +775,12 @@ public sealed class MainForm : Form
         void OnFrame(CameraFrame frame)
         {
             if (Interlocked.Increment(ref frames) == 1 && IsHandleCreated && !IsDisposed)
-                BeginInvoke(new Action(() => RememberCamera(ssid, source)));
+                BeginInvoke(new Action(() =>
+                {
+                    RememberCamera(ssid, source);
+                    if (source is I4SeasonCamera camera && !ct.IsCancellationRequested)
+                        EnableLight(camera);
+                }));
             ShowFrame(frame);
         }
         void OnBattery(int percent)
@@ -715,6 +801,71 @@ public sealed class MainForm : Form
             source.Log -= Log;
             source.FrameReceived -= OnFrame;
             source.BatteryChanged -= OnBattery;
+            if (_lightCamera == source)
+                EnableLight(null);
+        }
+    }
+
+    /// <summary>Points the Light controls at a streaming camera (or none), re-applying the light if it's switched on.</summary>
+    void EnableLight(I4SeasonCamera? camera)
+    {
+        _lightCamera = camera;
+        UpdateLightControls();
+        if (camera != null && _lightBox.Checked)
+            _ = ApplyLightAsync();
+    }
+
+    void UpdateLightControls()
+    {
+        _lightBox.Enabled = _lightCamera != null;
+        _lightSlider.Enabled = _lightCamera != null && _lightBox.Checked;
+    }
+
+    /// <summary>
+    /// Sends the Light controls' state to the camera. Changes made while a command is in flight (e.g. dragging
+    /// the slider) are merged into one follow-up command instead of queueing one per step.
+    /// </summary>
+    async Task ApplyLightAsync()
+    {
+        UpdateLightControls();
+        if (_lightUpdating || _lightCamera is not { } camera)
+            return;
+        if (_lightBusy)
+        {
+            _lightDirty = true;
+            return;
+        }
+        _lightBusy = true;
+        try
+        {
+            do
+            {
+                _lightDirty = false;
+                bool on = _lightBox.Checked;
+                int brightness = _lightSlider.Value * 100 / _lightSlider.Maximum;
+                bool? state = await camera.SetLightAsync(on, brightness, CancellationToken.None);
+                if (state == null)
+                {
+                    Log("The camera didn't confirm the light command; this model may not support remote light control.");
+                    break;
+                }
+                Log(state.Value ? $"Light on, brightness {brightness}%." : "Light off.");
+                if (state.Value != on)
+                {
+                    _lightUpdating = true;
+                    _lightBox.Checked = state.Value;
+                    _lightUpdating = false;
+                    UpdateLightControls();
+                }
+            } while (_lightDirty && _lightCamera == camera);
+        }
+        catch (SocketException ex)
+        {
+            Log($"Light command failed: {ex.Message}");
+        }
+        finally
+        {
+            _lightBusy = false;
         }
     }
 
@@ -724,8 +875,17 @@ public sealed class MainForm : Form
             return;
         if (!_settings.KnownCameras.Contains(ssid))
             _settings.KnownCameras.Add(ssid);
-        if (source is StreamCameraSource stream && SelectedCameraType == CameraType.Auto)
-            _settings.StreamUrls[ssid] = stream.Url;
+        if (SelectedCameraType == CameraType.Auto)
+        {
+            _settings.CameraTypes[ssid] = source switch
+            {
+                I4SeasonCamera => CameraType.I4Season,
+                VStarcamCamera => CameraType.VStarcam,
+                _ => CameraType.StreamUrl,
+            };
+            if (source is StreamCameraSource stream)
+                _settings.StreamUrls[ssid] = stream.Url;
+        }
         _settings.Save();
     }
 
@@ -750,7 +910,38 @@ public sealed class MainForm : Form
         _autoPaused = true;
     }
 
-    void ResumeAuto() => _autoPaused = false;
+    void ResumeAuto()
+    {
+        _autoPaused = false;
+        ResetAutoRetry();
+    }
+
+    void ResetAutoRetry()
+    {
+        _autoFailures = 0;
+        _autoRetryTick = 0;
+    }
+
+    /// <summary>
+    /// Starts the video for auto-connect. When it gets no video, the next try waits longer each time
+    /// (10 s, 20 s, 40 s ... up to 5 minutes), so a camera the app can't read doesn't flood the log.
+    /// </summary>
+    async Task AutoStartVideoAsync()
+    {
+        long before = Interlocked.Read(ref _framesReceived);
+        await StartVideoAsync(probeOnFailure: false);
+        if (Interlocked.Read(ref _framesReceived) != before)
+        {
+            ResetAutoRetry(); // it streamed, so a drop is worth retrying right away
+            return;
+        }
+        _autoFailures++;
+        int delaySeconds = Math.Min(300, 10 << Math.Min(_autoFailures - 1, 5));
+        _autoRetryTick = Environment.TickCount64 + delaySeconds * 1000L;
+        Log($"Auto-connect: no video ({_autoFailures} {(_autoFailures == 1 ? "try" : "tries in a row")}); " +
+            $"trying again in {(delaySeconds < 60 ? $"{delaySeconds} seconds" : $"{delaySeconds / 60} minute(s)")}.");
+        SetStatus($"No supported video found; retrying in {delaySeconds} s");
+    }
 
     /// <summary>
     /// Runs every few seconds while auto-connect is on: joins the camera when it's visible,
@@ -767,11 +958,13 @@ public sealed class MainForm : Form
         {
             if (IsCameraNetwork(_wlan.GetCurrentProfile(adapter.Id)))
             {
-                _autoWaitLogged = false;
+                _autoWaitMessage = null;
                 if (_videoCts == null)
                 {
-                    Log("Auto-connect: starting video.");
-                    _ = StartVideoAsync(probeOnFailure: false);
+                    if (Environment.TickCount64 < _autoRetryTick)
+                        return;
+                    Log(_autoFailures == 0 ? "Auto-connect: starting video." : $"Auto-connect: trying the video again (try {_autoFailures + 1}).");
+                    _ = AutoStartVideoAsync();
                 }
                 else if (Environment.TickCount64 - Interlocked.Read(ref _lastFrameTick) > StallTimeout.TotalMilliseconds)
                 {
@@ -786,6 +979,7 @@ public sealed class MainForm : Form
                 Log("Auto-connect: lost the camera's Wi-Fi.");
                 StopVideo();
             }
+            ResetAutoRetry(); // off the camera network: the next camera gets a fresh start
 
             try
             {
@@ -800,14 +994,20 @@ public sealed class MainForm : Form
             var target = cameras.FirstOrDefault(n => n.Ssid == _settings.LastSsid) ?? cameras.FirstOrDefault();
             if (target == null)
             {
-                if (!_autoWaitLogged)
-                    Log("Auto-connect: waiting for the camera's Wi-Fi to appear...");
-                _autoWaitLogged = true;
+                // Auto-connect only joins networks that have streamed before; say so when a likely camera is in range.
+                var untried = _networks.Where(n => IsCameraNetwork(n.Ssid)).Select(n => n.Ssid).ToList();
+                string message = untried.Count > 0
+                    ? $"Auto-connect: {string.Join(", ", untried)} looks like a camera but hasn't streamed here before, " +
+                      "so it isn't joined automatically. Pick it under Network and click Connect to try it."
+                    : "Auto-connect: waiting for a camera's Wi-Fi to appear...";
+                if (message != _autoWaitMessage)
+                    Log(message);
+                _autoWaitMessage = message;
                 SetStatus("Waiting for camera...");
                 return;
             }
 
-            _autoWaitLogged = false;
+            _autoWaitMessage = null;
             if (_autoPaused || !_autoConnect.Checked)
                 return; // the user changed their mind during the scan
             Log($"Auto-connect: found {target.Ssid}.");
@@ -832,6 +1032,7 @@ public sealed class MainForm : Form
         _lastFrame = frame;
         Interlocked.Exchange(ref _lastFrameTick, Environment.TickCount64);
         Interlocked.Increment(ref _framesThisSecond);
+        Interlocked.Increment(ref _framesReceived);
         _pipeline.Submit(frame);
     }
 
@@ -892,7 +1093,7 @@ public sealed class MainForm : Form
     {
         var o = _settings.Enhance ?? new EnhanceOptions();
         _rotation = o.Rotation;
-        _rotateButton.Text = _rotation == 0 ? "Rotate" : $"Rotate ({_rotation}\u00b0)";
+        ShowRotation();
         _denoiseBox.Checked = o.Denoise;
         _denoiseSlider.Value = Math.Clamp(o.DenoiseStrength, 1, 10);
         _sharpenBox.Checked = o.Sharpen;
@@ -949,13 +1150,13 @@ public sealed class MainForm : Form
         string tag = !o.Sbs3D ? "" : o.HalfSbs ? "_HSBS" : "_SBS";
         string file = Path.Combine(RecordingDir, $"{FilePrefix()}-{DateTime.Now:yyyyMMdd-HHmmss}{tag}.mp4");
         _pipeline.StartRecording(file);
-        _recordButton.Text = "■ Stop recording";
+        ShowRecordButton(recording: true);
         Log($"Recording to {file}");
     }
 
     void StopRecording()
     {
-        _recordButton.Text = "● Record";
+        ShowRecordButton(recording: false);
         if (_pipeline.StopRecording() is { } file && File.Exists(file))
             Log($"Recording saved: {file} ({new FileInfo(file).Length / 1024 / 1024.0:0.0} MB)");
     }
@@ -986,7 +1187,7 @@ public sealed class MainForm : Form
             _picture.Image?.RotateFlip(RotateFlipType.Rotate90FlipNone);
             _picture.Invalidate();
         }
-        _rotateButton.Text = _rotation == 0 ? "Rotate" : $"Rotate ({_rotation}°)";
+        ShowRotation();
     }
 
     /// <summary>Video only, borderless and maximized. F11, Esc or double-click returns.</summary>

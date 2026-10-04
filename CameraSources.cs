@@ -25,6 +25,7 @@ public enum CameraType
     Auto,
     I4Season,
     StreamUrl,
+    VStarcam, // added last: the setting is saved as a number
 }
 
 /// <summary>
@@ -42,8 +43,14 @@ public sealed class StreamCameraSource : ICameraSource
     const int TimeoutMs = 5000;
 
     readonly string _url;
+    readonly string _name;
 
-    public StreamCameraSource(string url) => _url = url;
+    /// <param name="name">What to call the stream in the log; the URL if not given.</param>
+    public StreamCameraSource(string url, string? name = null)
+    {
+        _url = url;
+        _name = name ?? url;
+    }
 
     public string Url => _url;
 
@@ -57,12 +64,12 @@ public sealed class StreamCameraSource : ICameraSource
 
     bool Stream(CancellationToken ct)
     {
-        Log?.Invoke($"Opening {_url}...");
+        Log?.Invoke($"Opening {_name}...");
         using var capture = new VideoCapture(_url, VideoCaptureAPIs.FFMPEG,
             [OpenTimeoutProperty, TimeoutMs, ReadTimeoutProperty, TimeoutMs]);
         if (!capture.IsOpened())
         {
-            Log?.Invoke($"Couldn't open {_url}.");
+            Log?.Invoke($"Couldn't open {_name}.");
             return false;
         }
         Log?.Invoke($"Stream open: {capture.FrameWidth}x{capture.FrameHeight}, {capture.Fps:0} fps reported.");

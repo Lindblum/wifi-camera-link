@@ -14,6 +14,7 @@ public sealed record CameraFrame(byte[] Jpeg, int Width, int Height);
 /// Device info goes to port 10005. OpenVideo (port 10006) names a UDP port of ours; the camera then sends JPEG
 /// frames there, one chunk per datagram with a 16-byte header. The app re-sends OpenVideo about once a second
 /// whenever video stops arriving. Protocol notes: https://github.com/rbeilvert/otoscope/issues/38
+/// The light command comes from https://github.com/HeikoGr/wifi-cam-proxy (firmware/src/cam_i4season.cpp).
 /// </summary>
 public sealed class I4SeasonCamera : ICameraSource
 {
@@ -22,6 +23,7 @@ public sealed class I4SeasonCamera : ICameraSource
     const int VideoControlPort = 10006;
     const ushort CmdDeviceInfo = 0x0001;
     const ushort CmdOpenVideo = 0x0004;
+    const ushort CmdLight = 0x000A;
     const int BatteryOffset = 0x77; // u16 in the device-info payload; percent is the top 7 bits
     static readonly TimeSpan BatteryPollInterval = TimeSpan.FromSeconds(15);
     const int SioUdpConnReset = -1744830452;
@@ -132,6 +134,46 @@ public sealed class I4SeasonCamera : ICameraSource
             try { await Task.WhenAll(keepAlive, batteryPoll); }
             catch (OperationCanceledException) { }
         }
+    }
+
+    /// <summary>
+    /// Switches the camera's light and sets its brightness (1-100), resending until the camera confirms.
+    /// Returns the state the camera reports, or null if it doesn't answer (some models only have a hardware dimmer).
+    /// </summary>
+    /// <remarks>
+    /// Payload: op 0x11 (light, write), on/off, brightness. Uses its own socket so the reply can't be
+    /// taken by the battery poll reading the control socket.
+    /// </remarks>
+    public async Task<bool?> SetLightAsync(bool on, int brightness, CancellationToken ct)
+    {
+        using var udp = NewUdpClient();
+        var packet = Packet(CmdLight, [0x11, (byte)(on ? 1 : 0), (byte)(on ? Math.Clamp(brightness, 1, 100) : 0)]);
+        var target = new IPEndPoint(_camera, InfoPort);
+        for (int attempt = 0; attempt < 5; attempt++)
+        {
+            await udp.SendAsync(packet, target, ct);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(300);
+            try
+            {
+                while (true)
+                {
+                    var data = (await udp.ReceiveAsync(timeout.Token)).Buffer;
+                    if (data.Length < 12 || BinaryPrimitives.ReadUInt32LittleEndian(data) != Magic ||
+                        BinaryPrimitives.ReadUInt16LittleEndian(data.AsSpan(6)) != CmdLight)
+                        continue;
+                    if (data[9] != 0)
+                    {
+                        Log?.Invoke($"The camera refused the light command (status {data[9]}).");
+                        return null;
+                    }
+                    if (data.Length >= 14)
+                        return data[13] != 0; // payload byte 1: the light's resulting state
+                }
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested) { }
+        }
+        return null;
     }
 
     /// <summary>Returns the device-info payload, or null if the camera doesn't answer.</summary>
