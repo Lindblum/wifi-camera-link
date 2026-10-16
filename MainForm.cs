@@ -378,7 +378,8 @@ public sealed class MainForm : Form
 
     /// <summary>
     /// Gives labels, text boxes and dropdowns the icon buttons' height, so each toolbar row lines up:
-    /// labels centre their text, and dropdowns are owner-drawn because that's the only way to set their height.
+    /// labels centre their text, dropdowns are owner-drawn because that's the only way to set their height,
+    /// and typed text is centred by <see cref="EditCentering"/>.
     /// Sliders can't change height, so they're centred instead.
     /// </summary>
     static void MatchHeight(IEnumerable<Control> controls, int height)
@@ -397,6 +398,7 @@ public sealed class MainForm : Form
                     box.AutoSize = false;
                     box.Height = height;
                     box.Margin = new Padding(box.Margin.Left, top, box.Margin.Right, top);
+                    EditCentering.Apply(box);
                     break;
                 case ComboBox combo:
                     // Widths are set in pixels and don't grow with display scaling, so let a box widen to fit
@@ -407,6 +409,8 @@ public sealed class MainForm : Form
                     combo.DrawItem += DrawComboItem;
                     combo.ItemHeight = height - 6; // the selection field; the border adds the rest
                     combo.Margin = new Padding(combo.Margin.Left, top, combo.Margin.Right, top);
+                    if (combo.DropDownStyle == ComboBoxStyle.DropDown)
+                        EditCentering.Apply(combo);
                     break;
                 default:
                     int spare = Math.Max(0, height - control.Height);
