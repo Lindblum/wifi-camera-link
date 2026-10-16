@@ -1,133 +1,63 @@
-using System.Diagnostics;
-using Microsoft.ML.OnnxRuntime;
-using Microsoft.ML.OnnxRuntime.Tensors;
 using OpenCvSharp;
 using Size = OpenCvSharp.Size;
 
 namespace WiFiCameraLink;
 
 /// <summary>
-/// Estimates depth from a single image with Depth Anything V2 Small (Apache-2.0), run through ONNX Runtime
-/// on the GPU via DirectML. Inference (~110 ms on an RX 570) runs on its own thread; the video keeps its
-/// frame rate by reusing the most recent depth map, which is also smoothed over time so it doesn't flicker.
+/// Estimates depth for 3D with one of the <see cref="DepthSource"/>s. Estimation (~110 ms per map for Depth
+/// Anything V2 on an RX 570) runs on its own thread; the video keeps its frame rate by reusing the most recent
+/// depth map, which is also smoothed over time so it doesn't flicker.
 /// </summary>
 public sealed class DepthEstimator : IDisposable
 {
-    const string ModelUrl = "https://huggingface.co/onnx-community/depth-anything-v2-small/resolve/main/onnx/model.onnx";
-    static readonly string ModelPath = Path.Combine(AppPaths.AppDir, "models", "depth_anything_v2_small.onnx");
-
-    const int InputSize = 518;          // the model's native size; a multiple of its 14-pixel patches
-    const float DepthBlend = 0.5f;      // weight of each new depth map against the running one
     const float RangeBlend = 0.2f;      // how fast the near/far normalization range follows the scene
-    static readonly float[] Mean = [0.485f, 0.456f, 0.406f];
-    static readonly float[] Std = [0.229f, 0.224f, 0.225f];
 
-    readonly InferenceSession _session;
-    readonly string _inputName;
+    readonly IDepthModel _model;
     readonly Thread _worker;
     readonly AutoResetEvent _wake = new(false);
     readonly object _lock = new();
-    Mat? _pending;      // newest frame waiting for inference
+    (Mat Frame, EnhanceOptions Options)? _pending; // newest frame waiting for estimation
     Mat? _depth;        // latest depth, frame-sized CV_32F, 0 = far .. 1 = near
+    Mat? _state;        // the smoothed depth at the model's resolution
+    Mat? _stateGray;    // the picture's brightness when _state was last updated, to spot motion
     float _near = float.NaN, _far = float.NaN;
     int _completed;
     volatile bool _disposed;
 
-    DepthEstimator(InferenceSession session, string device)
+    DepthEstimator(IDepthModel model, DepthSource source)
     {
-        _session = session;
-        _inputName = session.InputMetadata.Keys.First();
-        Device = device;
+        _model = model;
+        Source = source;
         _worker = new Thread(Run) { IsBackground = true, Name = "Depth", Priority = ThreadPriority.BelowNormal };
         _worker.Start();
     }
 
-    public string Device { get; }
+    public DepthSource Source { get; }
+
+    public string Device => _model.Device;
 
     public string? LastError { get; private set; }
 
     /// <summary>Depth maps finished since the last call (for a depth-rate readout).</summary>
     public int TakeCompletedCount() => Interlocked.Exchange(ref _completed, 0);
 
-    public static async Task<DepthEstimator> CreateAsync(Action<string> log, CancellationToken ct = default)
+    /// <summary>Loads the source's model, downloading it the first time.</summary>
+    public static async Task<DepthEstimator> CreateAsync(DepthSource source, Action<string> log, CancellationToken ct = default) =>
+        new(await DepthModels.CreateAsync(source, log, ct), source);
+
+    /// <summary>
+    /// Queues a frame for depth estimation. If the estimator is still busy, it replaces any older waiting
+    /// frame. Safe to call after <see cref="Dispose"/>, which the UI may do while the pipeline is mid-frame.
+    /// </summary>
+    public void Submit(Mat frame, EnhanceOptions options)
     {
-        if (!File.Exists(ModelPath))
-            await DownloadModelAsync(log, ct);
-
-        return await Task.Run(() =>
-        {
-            try
-            {
-                var options = new SessionOptions
-                {
-                    EnableMemoryPattern = false, // required by DirectML
-                    ExecutionMode = ExecutionMode.ORT_SEQUENTIAL,
-                    LogSeverityLevel = OrtLoggingLevel.ORT_LOGGING_LEVEL_ERROR,
-                    // The GPU does the work; by default ONNX Runtime would also keep a busy-waiting thread
-                    // on every core, which halves the speed of the video processing running alongside.
-                    IntraOpNumThreads = 1,
-                    InterOpNumThreads = 1,
-                };
-                options.AddSessionConfigEntry("session.intra_op.allow_spinning", "0");
-                options.AddSessionConfigEntry("session.inter_op.allow_spinning", "0");
-                options.AppendExecutionProvider_DML(0); // default adapter: the RX 570 here, ~8x faster than the Intel GPU
-                return new DepthEstimator(new InferenceSession(ModelPath, options), "GPU (DirectML)");
-            }
-            catch (Exception ex) when (ex is OnnxRuntimeException or EntryPointNotFoundException or DllNotFoundException)
-            {
-                log($"GPU depth isn't available ({ex.Message.Split('\n')[0]}); using the CPU, which manages only a few depth maps per second.");
-                var options = new SessionOptions
-                {
-                    IntraOpNumThreads = Math.Max(1, Environment.ProcessorCount / 2),
-                    LogSeverityLevel = OrtLoggingLevel.ORT_LOGGING_LEVEL_ERROR,
-                };
-                options.AddSessionConfigEntry("session.intra_op.allow_spinning", "0");
-                return new DepthEstimator(new InferenceSession(ModelPath, options), "CPU");
-            }
-        }, ct);
-    }
-
-    static async Task DownloadModelAsync(Action<string> log, CancellationToken ct)
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(ModelPath)!);
-        string partial = ModelPath + ".part";
-        log("Downloading the 3D depth model (99 MB, first time only)...");
-
-        using var http = new HttpClient();
-        using var response = await http.GetAsync(ModelUrl, HttpCompletionOption.ResponseHeadersRead, ct);
-        response.EnsureSuccessStatusCode();
-        long total = response.Content.Headers.ContentLength ?? 0;
-
-        await using (var source = await response.Content.ReadAsStreamAsync(ct))
-        await using (var target = File.Create(partial))
-        {
-            var buffer = new byte[1 << 16];
-            long done = 0;
-            int lastReported = 0, read;
-            while ((read = await source.ReadAsync(buffer, ct)) > 0)
-            {
-                await target.WriteAsync(buffer.AsMemory(0, read), ct);
-                done += read;
-                int percent = total > 0 ? (int)(done * 100 / total) : 0;
-                if (percent >= lastReported + 25)
-                {
-                    lastReported = percent / 25 * 25;
-                    log($"  ...{lastReported}%");
-                }
-            }
-        }
-        File.Move(partial, ModelPath, overwrite: true);
-        log("Depth model downloaded.");
-    }
-
-    /// <summary>Queues a frame for depth estimation. If the GPU is still busy, it replaces any older waiting frame.</summary>
-    public void Submit(Mat frame)
-    {
+        if (_disposed)
+            return;
         var copy = frame.Clone();
         lock (_lock)
         {
-            _pending?.Dispose();
-            _pending = copy;
+            _pending?.Frame.Dispose();
+            _pending = (copy, options);
         }
         _wake.Set();
     }
@@ -147,32 +77,24 @@ public sealed class DepthEstimator : IDisposable
             if (_disposed)
                 return;
 
-            Mat? frame;
+            (Mat Frame, EnhanceOptions Options)? pending;
             lock (_lock)
             {
-                frame = _pending;
+                pending = _pending;
                 _pending = null;
             }
-            if (frame == null)
+            if (pending is not var (frame, options))
                 continue;
 
             using (frame)
             {
                 try
                 {
-                    var depth = Infer(frame);
+                    var depth = Update(frame, options);
                     lock (_lock)
                     {
-                        if (_depth != null && _depth.Size() == depth.Size())
-                        {
-                            Cv2.AddWeighted(depth, DepthBlend, _depth, 1 - DepthBlend, 0, _depth);
-                            depth.Dispose();
-                        }
-                        else
-                        {
-                            _depth?.Dispose();
-                            _depth = depth;
-                        }
+                        _depth?.Dispose();
+                        _depth = depth;
                     }
                     Interlocked.Increment(ref _completed);
                     LastError = null;
@@ -185,41 +107,44 @@ public sealed class DepthEstimator : IDisposable
         }
     }
 
-    Mat Infer(Mat bgr)
+    /// <summary>Estimates the frame's depth, blends it into the running depth and returns that at frame size.</summary>
+    Mat Update(Mat frame, EnhanceOptions o)
     {
-        var tensor = new DenseTensor<float>([1, 3, InputSize, InputSize]);
-        using (var resized = bgr.Resize(new Size(InputSize, InputSize), 0, 0, InterpolationFlags.Area))
-            FillTensor(resized, tensor.Buffer.Span);
+        using var raw = _model.Estimate(frame, o.DepthDetail);
+        Normalize(raw);
 
-        using var results = _session.Run([NamedOnnxValue.CreateFromTensor(_inputName, tensor)]);
-        var output = results[0].AsTensor<float>();
-        int height = output.Dimensions[^2], width = output.Dimensions[^1];
-        float[] values = output.ToArray();
+        using var gray = new Mat();
+        using (var small = frame.Resize(raw.Size(), 0, 0, InterpolationFlags.Area))
+            Cv2.CvtColor(small, gray, ColorConversionCodes.BGR2GRAY);
+        gray.ConvertTo(gray, MatType.CV_32FC1, 1 / 255.0);
 
-        using var raw = Mat.FromPixelData(height, width, MatType.CV_32FC1, values);
+        if (_state == null || _state.Size() != raw.Size())
+        {
+            _state?.Dispose();
+            _state = raw.Clone();
+        }
+        else
+        {
+            // Each new map's weight is 1 - smoothing, but where the picture changed since the last map it rises
+            // to 1, so moving things don't drag a ghost of their old depth behind them (as in the 2D-3D add-on).
+            using var weight = new Mat();
+            Cv2.Absdiff(gray, _stateGray!, weight);
+            weight.ConvertTo(weight, MatType.CV_32FC1, 1 / 0.12, -0.03 / 0.12); // 0 at a change of 0.03, 1 at 0.15
+            Cv2.Max(weight, 1 - o.Smoothing / 100.0, weight);
+            Cv2.Min(weight, 1, weight);
+            using var change = new Mat();
+            Cv2.Subtract(raw, _state, change);
+            Cv2.Multiply(change, weight, change);
+            Cv2.Add(_state, change, _state);
+        }
+        _stateGray?.Dispose();
+        _stateGray = gray.Clone();
+
         var depth = new Mat();
-        Cv2.Resize(raw, depth, bgr.Size(), 0, 0, InterpolationFlags.Linear);
+        Cv2.Resize(_state, depth, frame.Size(), 0, 0, InterpolationFlags.Linear);
         // Soft depth edges give fewer tearing artifacts when pixels are shifted for each eye.
         Cv2.GaussianBlur(depth, depth, new Size(0, 0), 2.5);
-        Normalize(depth);
         return depth;
-    }
-
-    /// <summary>RGB, scaled to 0..1, ImageNet mean/std normalized, planar (NCHW).</summary>
-    static unsafe void FillTensor(Mat bgr, Span<float> buffer)
-    {
-        int size = bgr.Width, plane = size * size;
-        for (int y = 0; y < size; y++)
-        {
-            byte* row = (byte*)bgr.Ptr(y);
-            for (int x = 0; x < size; x++)
-            {
-                int i = y * size + x;
-                buffer[i] = (row[x * 3 + 2] / 255f - Mean[0]) / Std[0];
-                buffer[plane + i] = (row[x * 3 + 1] / 255f - Mean[1]) / Std[1];
-                buffer[2 * plane + i] = (row[x * 3] / 255f - Mean[2]) / Std[2];
-            }
-        }
     }
 
     /// <summary>
@@ -245,14 +170,17 @@ public sealed class DepthEstimator : IDisposable
     public void Dispose()
     {
         _disposed = true;
-        _wake.Set();
+        _wake.Set(); // not disposed itself: the pipeline may still call Submit, which only checks _disposed
         _worker.Join(2000);
-        _session.Dispose();
+        _model.Dispose();
         lock (_lock)
         {
-            _pending?.Dispose();
+            _pending?.Frame.Dispose();
+            _pending = null;
             _depth?.Dispose();
+            _depth = null;
         }
-        _wake.Dispose();
+        _state?.Dispose();
+        _stateGray?.Dispose();
     }
 }

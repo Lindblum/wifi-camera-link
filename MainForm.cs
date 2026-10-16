@@ -25,7 +25,7 @@ public sealed class MainForm : Form
         IconStop = "\uE71A", IconSnapshot = "\uE722", IconRecord = "\uE7C8", IconRotate = "\uE7AD",
         IconFullScreen = "\uE740", IconProbe = "\uE9D9", IconPictures = "\uE8B9", IconVideos = "\uE8B2",
         IconDenoise = "\uF4A5", IconSharpen = "\uE793", IconStabilize = "\uE7B7", IconInterpolate = "\uE916",
-        Icon3D = "\uF158", IconHalfWidth = "\uF57C", IconSwapEyes = "\uE8AB", IconShowAll = "\uE8FD",
+        Icon3D = "\uF158", IconOptions = "\uE713", IconSwapEyes = "\uE8AB", IconShowAll = "\uE8FD",
         IconAutoConnect = "\uE8EE", IconDeepScan = "\uE773", IconStretch = "\uE9A6", IconLight = "\uEA80",
         IconTimestamp = "\uEC92";
     static readonly Font IconFont = new(
@@ -75,7 +75,18 @@ public sealed class MainForm : Form
     readonly Label _perfSize = Metric("Resolution: -", 150);
     readonly CheckBox _sbsBox = IconToggle(Icon3D);
     readonly TrackBar _depthSlider = Slider(MaxIntensity);
-    readonly CheckBox _halfSbsBox = IconToggle(IconHalfWidth);
+    readonly ComboBox _layoutBox = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 130, DropDownWidth = 170 };
+    readonly ComboBox _depthSourceBox = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 140, DropDownWidth = 170 };
+    readonly Button _stereoOptionsButton = IconButton(IconOptions);
+    // In the 3D options window.
+    readonly TrackBar _convergenceSlider = Slider(20, 0);   // x5 %
+    readonly TrackBar _smoothingSlider = Slider(9, 0);      // x10 %
+    readonly TrackBar _edgeSnapSlider = Slider(10, 0);
+    readonly TrackBar _edgeDilationSlider = Slider(30, 0);  // pixels
+    readonly ComboBox _holeFillBox = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 110 };
+    readonly ComboBox _depthDetailBox = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 110 };
+    static readonly (string Name, int Pixels)[] DepthDetails = [("Fast", 252), ("Balanced", 364), ("Detailed", 518)];
+    Form? _stereoOptionsWindow;
     readonly CheckBox _swapEyesBox = IconToggle(IconSwapEyes);
     readonly VideoPipeline _pipeline = new();
     readonly SplitContainer _split = new() { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal };
@@ -157,10 +168,28 @@ public sealed class MainForm : Form
             (_sharpenSlider, "Sharpening amount", "how strongly detail is sharpened"),
             (_stabilizeBox, "Stabilize", "steady a shaky picture"),
             (_interpolateBox, "Double frame rate", "insert a motion-estimated frame between camera frames; 20 fps becomes 40, about 50 ms later"),
-            (_sbsBox, "Convert to 3D", "side-by-side 3D from estimated depth, for VR headsets and 3D TVs"),
+            (_sbsBox, "Convert to 3D", "3D from estimated depth, for VR headsets, 3D TVs and 3D glasses"),
+            (_layoutBox, "3D display", "how the two eyes' views are arranged: side by side or top and bottom (full, or " +
+                "squeezed into one frame), interlaced rows for passive 3D TVs (at the TV's native resolution), " +
+                "red/cyan anaglyph, or the depth itself"),
+            (_depthSourceBox, "Depth source", "how depth is estimated: Depth Anything V2, V3 and MiDaS are AI models " +
+                "(downloaded once, run on the GPU; MiDaS is fastest, V3 smoothest); Scene cues, Ground plane and " +
+                "Motion parallax are instant guesses that need no GPU"),
             (_depthSlider, "3D intensity", "how strong the depth effect is"),
-            (_halfSbsBox, "Half width", "squeeze both eyes into one normal-width frame"),
-            (_swapEyesBox, "Swap eyes", "put the left eye's view on the right, for cross-eyed viewing"),
+            (_swapEyesBox, "Swap eyes", "put the left eye's view on the right, for cross-eyed viewing or inside-out depth"),
+            (_stereoOptionsButton, "3D options", "convergence, smoothing and artifact cleanup"),
+            (_convergenceSlider, "Convergence", "which depth sits at the screen: left puts everything in front of it, " +
+                "right puts everything behind"),
+            (_smoothingSlider, "Smoothing", "how much each depth map is blended with the previous ones; steadier " +
+                "but slower to follow (moving areas always update quickly)"),
+            (_edgeSnapSlider, "Edge snapping", "how closely depth edges follow the picture's edges; lower it if " +
+                "textured areas wobble"),
+            (_edgeDilationSlider, "Edge dilation", "grow near depth outward by this many pixels, so object rims move " +
+                "with the object; raise it if you see outlines (halos) around objects"),
+            (_holeFillBox, "Hole fill", "what fills background uncovered beside shifted objects: Stretch smears the " +
+                "edge, Sharp repeats the background color, Soft blends nearby background, Mirror continues its texture"),
+            (_depthDetailBox, "Depth detail", "the resolution AI depth models work at: lower is faster, higher " +
+                "finds smaller objects (MiDaS always uses 256)"),
             (_perfLatency, "Latency", "time from a camera frame arriving to the finished frame reaching the display"),
             (_perfDropped, "Skipped", "camera frames skipped because processing was still busy with the previous one"),
             (_perfSize, "Resolution", "the picture as the camera sends it, and after resampling"),
@@ -265,12 +294,27 @@ public sealed class MainForm : Form
         _pipeline.FrameReady += ShowProcessedFrame;
         _pipeline.Log += Log;
         _resolutionBox.Items.AddRange([.. Resolutions.Select(r => r.Name)]);
+        _layoutBox.Items.AddRange(["Side by side", "Half side by side", "Top and bottom", "Half top and bottom",
+            "Interlaced", "Anaglyph", "Depth map", "2D + depth"]);
+        _depthSourceBox.Items.AddRange([.. Enum.GetValues<DepthSource>().Select(DepthModels.Name)]);
+        _holeFillBox.Items.AddRange([.. Enum.GetNames<HoleFill>()]);
+        _depthDetailBox.Items.AddRange([.. DepthDetails.Select(d => d.Name)]);
         LoadEnhanceSettings();
         _resolutionBox.SelectedIndexChanged += (_, _) => ApplyEnhanceOptions();
-        foreach (var box in new[] { _denoiseBox, _sharpenBox, _stabilizeBox, _interpolateBox, _stretchBox, _halfSbsBox, _swapEyesBox })
+        foreach (var box in new[] { _denoiseBox, _sharpenBox, _stabilizeBox, _interpolateBox, _stretchBox, _swapEyesBox })
             box.CheckedChanged += (_, _) => ApplyEnhanceOptions();
-        foreach (var slider in new[] { _denoiseSlider, _sharpenSlider, _depthSlider })
+        foreach (var slider in new[] { _denoiseSlider, _sharpenSlider, _depthSlider, _convergenceSlider, _smoothingSlider,
+                     _edgeSnapSlider, _edgeDilationSlider })
             slider.ValueChanged += (_, _) => ApplyEnhanceOptions();
+        foreach (var combo in new[] { _layoutBox, _holeFillBox, _depthDetailBox })
+            combo.SelectedIndexChanged += (_, _) => ApplyEnhanceOptions();
+        _depthSourceBox.SelectedIndexChanged += async (_, _) =>
+        {
+            ApplyEnhanceOptions();
+            if (_sbsBox.Checked)
+                await EnsureDepthModelAsync();
+        };
+        _stereoOptionsButton.Click += (_, _) => ShowStereoOptions();
         _lightSlider.Value = _lightSlider.Maximum;
         _lightBox.CheckedChanged += async (_, _) => await ApplyLightAsync();
         _lightSlider.ValueChanged += async (_, _) => await ApplyLightAsync();
@@ -305,7 +349,7 @@ public sealed class MainForm : Form
             Section("Video", _startButton, _stopButton, _rotateButton, _fullScreenButton, _stretchBox, _resolutionBox),
             Section("Capture", _snapshotButton, _recordButton, _folderButton, _recordingsButton),
             Section("Enhance", _denoiseBox, _denoiseSlider, _sharpenBox, _sharpenSlider, _stabilizeBox, _interpolateBox),
-            Section("3D", _sbsBox, _depthSlider, _halfSbsBox, _swapEyesBox),
+            Section("3D", _sbsBox, _layoutBox, _depthSourceBox, _depthSlider, _swapEyesBox, _stereoOptionsButton),
             Section("Performance", _perfCamera, _perfShown, _perfLatency, _perfDepth, _perfDropped, _perfSize),
         ]);
         _rows.Add(toolbar);
@@ -378,7 +422,8 @@ public sealed class MainForm : Form
 
     /// <summary>
     /// Gives labels, text boxes and dropdowns the icon buttons' height, so each toolbar row lines up:
-    /// labels centre their text, and dropdowns are owner-drawn because that's the only way to set their height.
+    /// labels centre their text, dropdowns are owner-drawn because that's the only way to set their height,
+    /// and typed text is centred by <see cref="EditCentering"/>.
     /// Sliders can't change height, so they're centred instead.
     /// </summary>
     static void MatchHeight(IEnumerable<Control> controls, int height)
@@ -397,6 +442,7 @@ public sealed class MainForm : Form
                     box.AutoSize = false;
                     box.Height = height;
                     box.Margin = new Padding(box.Margin.Left, top, box.Margin.Right, top);
+                    EditCentering.Apply(box);
                     break;
                 case ComboBox combo:
                     // Widths are set in pixels and don't grow with display scaling, so let a box widen to fit
@@ -407,6 +453,8 @@ public sealed class MainForm : Form
                     combo.DrawItem += DrawComboItem;
                     combo.ItemHeight = height - 6; // the selection field; the border adds the rest
                     combo.Margin = new Padding(combo.Margin.Left, top, combo.Margin.Right, top);
+                    if (combo.DropDownStyle == ComboBoxStyle.DropDown)
+                        EditCentering.Apply(combo);
                     break;
                 default:
                     int spare = Math.Max(0, height - control.Height);
@@ -462,7 +510,7 @@ public sealed class MainForm : Form
         panel.MouseMove += (_, e) =>
         {
             var child = panel.GetChildAtPoint(e.Location, GetChildAtPointSkip.Invisible);
-            var target = child is { Enabled: false } && _tips.GetToolTip(child).Length > 0 ? child : null;
+            var target = child is { Enabled: false } && _tips.GetToolTip(child) is { Length: > 0 } ? child : null;
             if (target == shown)
                 return;
             shown = target;
@@ -518,9 +566,9 @@ public sealed class MainForm : Form
         Text = text, AutoSize = true, MinimumSize = new Size(minimumWidth, 0), Margin = new Padding(6, 6, 0, 0),
     };
 
-    static TrackBar Slider(int maximum = 10) => new()
+    static TrackBar Slider(int maximum = 10, int minimum = 1) => new()
     {
-        Minimum = 1, Maximum = maximum, Value = 5, Width = 80, AutoSize = false, Height = 26,
+        Minimum = minimum, Maximum = maximum, Value = 5, Width = 80, AutoSize = false, Height = 26,
         TickStyle = TickStyle.None, Margin = new Padding(0, 4, 6, 0),
     };
 
@@ -1287,12 +1335,20 @@ public sealed class MainForm : Form
             MaxLines = Resolutions[Math.Max(0, _resolutionBox.SelectedIndex)].Lines,
             Sbs3D = _sbsBox.Checked,
             Depth3D = _depthSlider.Value,
-            HalfSbs = _halfSbsBox.Checked,
+            Layout = (StereoLayout)Math.Max(0, _layoutBox.SelectedIndex),
+            DepthSource = SelectedDepthSource,
             SwapEyes = _swapEyesBox.Checked,
+            Convergence = _convergenceSlider.Value * 5,
+            Smoothing = _smoothingSlider.Value * 10,
+            EdgeSnap = _edgeSnapSlider.Value,
+            EdgeDilation = _edgeDilationSlider.Value,
+            HoleFill = (HoleFill)Math.Max(0, _holeFillBox.SelectedIndex),
+            DepthDetail = DepthDetails[Math.Max(0, _depthDetailBox.SelectedIndex)].Pixels,
         };
         _denoiseSlider.Enabled = _denoiseBox.Checked;
         _sharpenSlider.Enabled = _sharpenBox.Checked;
-        _depthSlider.Enabled = _halfSbsBox.Enabled = _swapEyesBox.Enabled = _sbsBox.Checked;
+        _layoutBox.Enabled = _depthSourceBox.Enabled = _depthSlider.Enabled = _swapEyesBox.Enabled = _sbsBox.Checked;
+        _depthDetailBox.Enabled = !DepthModels.IsHeuristic(SelectedDepthSource) && SelectedDepthSource != DepthSource.MiDaS;
 
         _settings.Enhance = _pipeline.Options;
         _settings.Save();
@@ -1313,33 +1369,131 @@ public sealed class MainForm : Form
         _resolutionBox.SelectedIndex = Math.Max(0, Array.FindIndex(Resolutions, r => r.Lines == o.MaxLines));
         _sbsBox.Checked = o.Sbs3D;
         _depthSlider.Value = Math.Clamp(o.Depth3D, 1, MaxIntensity);
-        _halfSbsBox.Checked = o.HalfSbs;
+        _layoutBox.SelectedIndex = (int)(o.HalfSbs && o.Layout == StereoLayout.SideBySide ? StereoLayout.HalfSideBySide : o.Layout);
+        _depthSourceBox.SelectedIndex = (int)o.DepthSource;
         _swapEyesBox.Checked = o.SwapEyes;
+        _convergenceSlider.Value = Math.Clamp(o.Convergence / 5, 0, _convergenceSlider.Maximum);
+        _smoothingSlider.Value = Math.Clamp(o.Smoothing / 10, 0, _smoothingSlider.Maximum);
+        _edgeSnapSlider.Value = Math.Clamp(o.EdgeSnap, 0, _edgeSnapSlider.Maximum);
+        _edgeDilationSlider.Value = Math.Clamp(o.EdgeDilation, 0, _edgeDilationSlider.Maximum);
+        _holeFillBox.SelectedIndex = (int)o.HoleFill;
+        _depthDetailBox.SelectedIndex = Math.Max(0, Array.FindIndex(DepthDetails, d => d.Pixels == o.DepthDetail));
         ApplyEnhanceOptions();
     }
 
-    /// <summary>Loads (downloading the first time) the depth model that 2D-to-3D needs.</summary>
+    DepthSource SelectedDepthSource => (DepthSource)Math.Max(0, _depthSourceBox.SelectedIndex);
+
+    /// <summary>
+    /// Loads (downloading the first time) the selected depth source, replacing the one in use. If the choice
+    /// changes while a model loads, the newer choice is loaded next.
+    /// </summary>
     async Task EnsureDepthModelAsync()
     {
-        if (_depthEstimator != null || _depthLoading)
+        if (_depthLoading)
             return;
         _depthLoading = true;
-        Log("3D: loading the depth model...");
         try
         {
-            _depthEstimator = await DepthEstimator.CreateAsync(Log);
-            _pipeline.Depth = _depthEstimator;
-            Log($"3D ready: depth runs on the {_depthEstimator.Device}. Until the first depth map arrives both eyes show the same picture.");
-        }
-        catch (Exception ex)
-        {
-            Log($"3D unavailable: {ex.Message}");
-            _sbsBox.Checked = false;
+            while (_sbsBox.Checked && _depthEstimator?.Source != SelectedDepthSource)
+            {
+                var source = SelectedDepthSource;
+                _pipeline.Depth = null; // both eyes flat until the new source's first depth map
+                _depthEstimator?.Dispose();
+                _depthEstimator = null;
+                Log($"3D: loading {DepthModels.Name(source)}...");
+                try
+                {
+                    _depthEstimator = await DepthEstimator.CreateAsync(source, Log);
+                    _pipeline.Depth = _depthEstimator;
+                    Log($"3D ready: {DepthModels.Name(source)} depth runs on the {_depthEstimator.Device}.");
+                }
+                catch (Exception ex)
+                {
+                    Log($"3D unavailable: {ex.Message}");
+                    _sbsBox.Checked = false;
+                }
+            }
         }
         finally
         {
             _depthLoading = false;
         }
+    }
+
+    /// <summary>The 3D options window: tuning that's set once rather than switched while watching.</summary>
+    void ShowStereoOptions()
+    {
+        if (_stereoOptionsWindow == null)
+        {
+            var table = new TableLayoutPanel
+            {
+                AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 3, Padding = new Padding(8),
+            };
+            void Row(string name, Control control, Func<string>? value = null)
+            {
+                var valueLabel = new Label { AutoSize = true, Anchor = AnchorStyles.Left, MinimumSize = new Size(50, 0) };
+                if (value != null && control is TrackBar slider)
+                {
+                    valueLabel.Text = value();
+                    slider.ValueChanged += (_, _) => valueLabel.Text = value();
+                    slider.Width = 160;
+                }
+                control.Anchor = AnchorStyles.Left;
+                table.Controls.Add(new Label { Text = name, AutoSize = true, Anchor = AnchorStyles.Left });
+                table.Controls.Add(control);
+                table.Controls.Add(valueLabel);
+            }
+            Row("Convergence", _convergenceSlider, () => $"{_convergenceSlider.Value * 5}%");
+            Row("Smoothing", _smoothingSlider, () => $"{_smoothingSlider.Value * 10}%");
+            Row("Edge snapping", _edgeSnapSlider, () => _edgeSnapSlider.Value == 0 ? "Off" : $"{_edgeSnapSlider.Value}");
+            Row("Edge dilation", _edgeDilationSlider, () => _edgeDilationSlider.Value == 0 ? "Off" : $"{_edgeDilationSlider.Value} px");
+            Row("Hole fill", _holeFillBox);
+            Row("Depth detail", _depthDetailBox);
+            var reset = new Button { Text = "Reset", AutoSize = true, Anchor = AnchorStyles.Left };
+            Describe(reset, "Reset", "return these options to their defaults");
+            reset.Click += (_, _) =>
+            {
+                var defaults = new EnhanceOptions();
+                _convergenceSlider.Value = defaults.Convergence / 5;
+                _smoothingSlider.Value = defaults.Smoothing / 10;
+                _edgeSnapSlider.Value = defaults.EdgeSnap;
+                _edgeDilationSlider.Value = defaults.EdgeDilation;
+                _holeFillBox.SelectedIndex = (int)defaults.HoleFill;
+                _depthDetailBox.SelectedIndex = Array.FindIndex(DepthDetails, d => d.Pixels == defaults.DepthDetail);
+            };
+            table.Controls.Add(reset);
+            ShowTooltipsWhenDisabled(table); // Depth detail is disabled for sources that don't use it
+
+            _stereoOptionsWindow = new Form
+            {
+                Text = "3D options", FormBorderStyle = FormBorderStyle.FixedToolWindow, ShowInTaskbar = false,
+                StartPosition = FormStartPosition.Manual, MaximizeBox = false, MinimizeBox = false, KeyPreview = true,
+            };
+            _stereoOptionsWindow.Controls.Add(table);
+            MatchHeight([_holeFillBox, _depthDetailBox], _stereoOptionsButton.Height); // like the toolbar's dropdowns
+            // An auto-sized form doesn't grow to fit an auto-sized table, so size it to the table, once it has its
+            // handle and display scaling.
+            _stereoOptionsWindow.Load += (_, _) => _stereoOptionsWindow.ClientSize = table.PreferredSize;
+            // Closing hides it, so it opens again where it was with its controls intact.
+            _stereoOptionsWindow.FormClosing += (_, e) =>
+            {
+                if (e.CloseReason == CloseReason.UserClosing)
+                {
+                    e.Cancel = true;
+                    _stereoOptionsWindow.Hide();
+                }
+            };
+            _stereoOptionsWindow.KeyDown += (_, e) =>
+            {
+                if (e.KeyCode == Keys.Escape)
+                    _stereoOptionsWindow.Hide();
+            };
+            _stereoOptionsWindow.Location = _stereoOptionsButton.PointToScreen(new Point(0, _stereoOptionsButton.Height + 4));
+        }
+        if (_stereoOptionsWindow.Visible)
+            _stereoOptionsWindow.Activate();
+        else
+            _stereoOptionsWindow.Show(this);
     }
 
     void ToggleRecording()
@@ -1357,7 +1511,17 @@ public sealed class MainForm : Form
         Directory.CreateDirectory(RecordingDir);
         var o = _pipeline.Options;
         // VR players look for these tags to show side-by-side files in 3D automatically.
-        string tag = !o.Sbs3D ? "" : o.HalfSbs ? "_HSBS" : "_SBS";
+        string tag = !o.Sbs3D ? "" : o.Layout switch
+        {
+            StereoLayout.SideBySide => "_SBS",
+            StereoLayout.HalfSideBySide => "_HSBS",
+            StereoLayout.TopBottom => "_TB",
+            StereoLayout.HalfTopBottom => "_HTB",
+            StereoLayout.Interlaced => "_interlaced",
+            StereoLayout.Anaglyph => "_anaglyph",
+            StereoLayout.DepthMap => "_depth",
+            _ => "_2D+depth",
+        };
         string file = Path.Combine(RecordingDir, $"{FilePrefix()}-{DateTime.Now:yyyyMMdd-HHmmss}{tag}.mp4");
         _pipeline.StartRecording(file);
         ShowRecordButton(recording: true);

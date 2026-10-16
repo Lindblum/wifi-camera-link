@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "zWYf/nUAsZo=",
+  "dgSpecHash": "Fru7TL0kcWQ=",
   "success": true,
-  "projectFilePath": "C:\\Users\\david\\Desktop\\Projects-Claude\\anesok-link\\WiFiCameraLink.csproj",
+  "projectFilePath": "C:\\Users\\david\\Desktop\\Projects-Claude\\wifi-camera-link\\WiFiCameraLink.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\david\\.nuget\\packages\\microsoft.ai.directml\\1.15.4\\microsoft.ai.directml.1.15.4.nupkg.sha512",
     "C:\\Users\\david\\.nuget\\packages\\microsoft.ml.onnxruntime.directml\\1.24.4\\microsoft.ml.onnxruntime.directml.1.24.4.nupkg.sha512",

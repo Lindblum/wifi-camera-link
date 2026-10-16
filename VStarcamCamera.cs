@@ -29,6 +29,9 @@ public sealed class VStarcamCamera : ICameraSource
     const int FrameHeaderSize = 32;
     const int MaxFrameSize = 4 * 1024 * 1024;
     static readonly TimeSpan BatteryPollInterval = TimeSpan.FromSeconds(15);
+    // H.264 access unit delimiter. FFmpeg's raw H.264 reader only knows a frame is complete when the next one
+    // starts; sending this right after each frame tells it at once, instead of a frame (67 ms) later.
+    static readonly byte[] AccessUnitDelimiter = [0x00, 0x00, 0x00, 0x01, 0x09, 0xF0];
 
     readonly IPAddress _local;
     readonly IPAddress _camera;
@@ -177,7 +180,8 @@ public sealed class VStarcamCamera : ICameraSource
                 try
                 {
                     await output.WriteAsync(payload.AsMemory(0, length), ct);
-                }
+                    if (Environment.GetEnvironmentVariable("WCL_NO_AUD") != "1") // TEST: A/B switch, remove
+                        await output.WriteAsync(AccessUnitDelimiter, ct);                }
                 catch (IOException)
                 {
                     return (frames, null); // the decoder closed its end

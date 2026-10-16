@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("WiFiCameraLink")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+d223a2a3efc381a17be74660c5bd78e0ea5eef90")]
 [assembly: System.Reflection.AssemblyProductAttribute("WiFi Camera Link")]
 [assembly: System.Reflection.AssemblyTitleAttribute("WiFiCameraLink")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
