@@ -354,11 +354,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\david\\Desktop\\Projects-Claude\\anesok-link\\WiFiCameraLink.csproj",
+      "projectUniqueName": "C:\\Users\\david\\Desktop\\Projects-Claude\\wifi-camera-link\\WiFiCameraLink.csproj",
       "projectName": "WiFiCameraLink",
-      "projectPath": "C:\\Users\\david\\Desktop\\Projects-Claude\\anesok-link\\WiFiCameraLink.csproj",
+      "projectPath": "C:\\Users\\david\\Desktop\\Projects-Claude\\wifi-camera-link\\WiFiCameraLink.csproj",
       "packagesPath": "C:\\Users\\david\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\david\\Desktop\\Projects-Claude\\anesok-link\\obj\\",
+      "outputPath": "C:\\Users\\david\\Desktop\\Projects-Claude\\wifi-camera-link\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
         "C:\\Users\\david\\AppData\\Roaming\\NuGet\\NuGet.Config",
@@ -424,7 +424,7 @@
             "privateAssets": "none"
           }
         },
-        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.425/PortableRuntimeIdentifierGraph.json"
+        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.426/PortableRuntimeIdentifierGraph.json"
       }
     }
   }

@@ -17,8 +17,16 @@ public sealed record EnhanceOptions
     public bool Stabilize { get; init; }
     public bool Interpolate { get; init; }          // double the frame rate with in-between frames
     public bool Sbs3D { get; init; }
-    public int Depth3D { get; init; } = 5;          // 1..10
-    public bool HalfSbs { get; init; }
+    public int Depth3D { get; init; } = 5;          // 1..15
+    public StereoLayout Layout { get; init; }
+    public DepthSource DepthSource { get; init; }
+    public int Convergence { get; init; } = 50;     // the depth, in %, that sits at the screen: 0 = all in front, 100 = all behind
+    public int Smoothing { get; init; } = 50;       // % of the running depth kept when a new depth map arrives
+    public int EdgeSnap { get; init; }              // 0..10: how closely depth edges follow the picture's edges
+    public int EdgeDilation { get; init; }          // pixels to grow near depth outward, 0..30
+    public HoleFill HoleFill { get; init; }
+    public int DepthDetail { get; init; } = 518;    // AI depth models see about this squared in pixels
+    public bool HalfSbs { get; init; }              // replaced by Layout; still read from older settings
     public bool SwapEyes { get; init; }
     public bool Stretch { get; init; }              // reshape to the display's aspect ratio, filling it
     public int MaxLines { get; init; }              // scale frames down so the shorter side is at most this; 0 = as sent
@@ -28,7 +36,7 @@ public sealed record EnhanceOptions
 
 /// <summary>
 /// Turns camera JPEGs into display bitmaps on a worker thread: rotate, stabilize, reduce grain, sharpen,
-/// then optionally render side-by-side 3D. Only the newest frame is processed if the worker falls behind.
+/// then optionally render 3D. Only the newest frame is processed if the worker falls behind.
 /// </summary>
 /// <summary>A frame's size as the camera sent it, and after resampling.</summary>
 public sealed record FrameSizes(Size Native, Size Resampled);
@@ -44,7 +52,7 @@ public sealed class VideoPipeline : IDisposable
     readonly AutoResetEvent _wake = new(false);
     readonly Stabilizer _stabilizer = new();
     readonly Denoiser _denoiser = new();
-    readonly SbsRenderer _sbs = new();
+    readonly StereoRenderer _stereo = new();
     readonly FrameInterpolator _interpolator = new();
     readonly Thread _presenter;
     readonly AutoResetEvent _presentWake = new(false);
@@ -294,7 +302,7 @@ public sealed class VideoPipeline : IDisposable
         }
     }
 
-    /// <summary>Final steps for display: side-by-side 3D, then stretching. Returns a new Mat the caller owns.</summary>
+    /// <summary>Final steps for display: 3D, then stretching. Returns a new Mat the caller owns.</summary>
     Mat Finish(Mat frame, EnhanceOptions o, bool realFrame)
     {
         Mat result;
@@ -302,9 +310,9 @@ public sealed class VideoPipeline : IDisposable
         {
             var depthEstimator = _depth;
             if (realFrame)
-                depthEstimator?.Submit(frame); // in-between frames reuse the real frames' depth
+                depthEstimator?.Submit(frame, o); // in-between frames reuse the real frames' depth
             using var depth = depthEstimator?.GetDepth(frame.Size());
-            result = _sbs.Render(frame, depth, o);
+            result = _stereo.Render(frame, depth, o);
         }
         else
         {
@@ -486,7 +494,6 @@ public sealed class VideoPipeline : IDisposable
             timeEndPeriod(1);
         _stabilizer.Reset();
         _denoiser.Reset();
-        _sbs.Dispose();
         _wake.Dispose();
         _presentWake.Dispose();
     }
@@ -634,81 +641,5 @@ sealed class Denoiser
         var result = new Mat();
         Cv2.BilateralFilter(averaged, result, 5, 10 + 4 * strength, 5);
         return result;
-    }
-}
-
-/// <summary>
-/// Builds a left and right view by shifting each pixel sideways in proportion to its depth (near things
-/// shift outward so they appear in front of the screen, far things behind), then places them side by side.
-/// </summary>
-sealed class SbsRenderer : IDisposable
-{
-    Mat? _mapLeft, _mapRight, _mapY;
-
-    public Mat Render(Mat frame, Mat? depth, EnhanceOptions o)
-    {
-        using var left = new Mat();
-        using var right = new Mat();
-        if (depth == null)
-        {
-            frame.CopyTo(left); // depth not ready yet: show it flat rather than jump the layout later
-            frame.CopyTo(right);
-        }
-        else
-        {
-            BuildMaps(depth, frame.Width * 0.006f * o.Depth3D); // 0.6%..6% of the width from far to near
-            Cv2.Remap(frame, left, _mapLeft!, _mapY!, InterpolationFlags.Linear, BorderTypes.Replicate);
-            Cv2.Remap(frame, right, _mapRight!, _mapY!, InterpolationFlags.Linear, BorderTypes.Replicate);
-        }
-
-        if (o.HalfSbs)
-        {
-            var half = new Size(frame.Width / 2, frame.Height);
-            Cv2.Resize(left, left, half, 0, 0, InterpolationFlags.Area);
-            Cv2.Resize(right, right, half, 0, 0, InterpolationFlags.Area);
-        }
-
-        var sideBySide = new Mat();
-        Cv2.HConcat(o.SwapEyes ? [right, left] : [left, right], sideBySide);
-        return sideBySide;
-    }
-
-    unsafe void BuildMaps(Mat depth, float maxDisparity)
-    {
-        int width = depth.Width, height = depth.Height;
-        if (_mapY == null || _mapY.Width != width || _mapY.Height != height)
-        {
-            Dispose();
-            _mapLeft = new Mat(height, width, MatType.CV_32FC1);
-            _mapRight = new Mat(height, width, MatType.CV_32FC1);
-            _mapY = new Mat(height, width, MatType.CV_32FC1);
-            for (int y = 0; y < height; y++)
-            {
-                using var row = _mapY.Row(y);
-                row.SetTo(y);
-            }
-        }
-
-        for (int y = 0; y < height; y++)
-        {
-            float* d = (float*)depth.Ptr(y);
-            float* l = (float*)_mapLeft!.Ptr(y);
-            float* r = (float*)_mapRight!.Ptr(y);
-            for (int x = 0; x < width; x++)
-            {
-                // Mid depth sits at the screen; nearer pixels get crossed disparity and pop out.
-                float shift = (d[x] - 0.5f) * maxDisparity * 0.5f;
-                l[x] = x - shift;
-                r[x] = x + shift;
-            }
-        }
-    }
-
-    public void Dispose()
-    {
-        _mapLeft?.Dispose();
-        _mapRight?.Dispose();
-        _mapY?.Dispose();
-        _mapLeft = _mapRight = _mapY = null;
     }
 }

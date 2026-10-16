@@ -40,6 +40,7 @@ public sealed class StreamCameraSource : ICameraSource
 {
     const int OpenTimeoutProperty = 53;  // CAP_PROP_OPEN_TIMEOUT_MSEC
     const int ReadTimeoutProperty = 54;  // CAP_PROP_READ_TIMEOUT_MSEC
+    const int ThreadsProperty = 70;      // CAP_PROP_N_THREADS (set when opening)
     const int TimeoutMs = 5000;
 
     readonly string _url;
@@ -66,7 +67,9 @@ public sealed class StreamCameraSource : ICameraSource
     {
         Log?.Invoke($"Opening {_name}...");
         using var capture = new VideoCapture(_url, VideoCaptureAPIs.FFMPEG,
-            [OpenTimeoutProperty, TimeoutMs, ReadTimeoutProperty, TimeoutMs]);
+            // One decoding thread: by default FFmpeg decodes several frames in parallel, one per CPU core, and holds
+            // that many frames back. On a 12-core PC that delayed 15 fps video by ~800 ms.
+            [OpenTimeoutProperty, TimeoutMs, ReadTimeoutProperty, TimeoutMs, ThreadsProperty, 1]);
         if (!capture.IsOpened())
         {
             Log?.Invoke($"Couldn't open {_name}.");
